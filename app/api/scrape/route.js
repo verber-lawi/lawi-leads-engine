@@ -1,4 +1,3 @@
-import { addBulkLeads, addFonte } from "../../../lib/notion";
 import { NextResponse } from "next/server";
 
 export async function POST(req) {
@@ -6,215 +5,153 @@ export async function POST(req) {
     const { url, tipo, estrategia, nome, dryRun } = await req.json();
     if (!url) return NextResponse.json({ error: "URL requerida" }, { status: 400 });
 
-    // Fetch the page
     const res = await fetch(url, {
       headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         "Accept": "text/html,application/xhtml+xml",
         "Accept-Language": "es,en;q=0.9,pt;q=0.8",
       },
     });
-    if (!res.ok) return NextResponse.json({ error: `HTTP ${res.status} al acceder la URL` }, { status: 400 });
+    if (!res.ok) return NextResponse.json({ error: "HTTP " + res.status }, { status: 400 });
     const html = await res.text();
 
-    // Detect source type and extract
-    let leads = [];
-    const domain = new URL(url).hostname.replace("www.", "");
+    var companies = extractCompanies(html);
 
-    if (domain.includes("mmerge.io") || domain.includes("smartsummit")) {
-      leads = extractEventSpeakers(html);
-    } else if (domain.includes("elreferente.es") || domain.includes("mentorday.es")) {
-      leads = extractAngelList(html);
-    } else {
-      // Generic extraction - try all patterns
-      leads = [...extractEventSpeakers(html), ...extractAngelList(html), ...extractGenericProfiles(html)];
-    }
-
-    // Deduplicate
-    const seen = new Set();
-    leads = leads.filter(l => {
-      const key = l.nome.toLowerCase().trim();
-      if (seen.has(key) || key.length < 3) return false;
-      seen.add(key);
+    // Deduplicate by name
+    var seen = {};
+    companies = companies.filter(function(c) {
+      var key = c.nome.toLowerCase().trim();
+      if (seen[key] || key.length < 2) return false;
+      seen[key] = true;
       return true;
     });
 
-    // Enrich with source info
-    const enriched = leads.map(l => ({
-      ...l,
-      fuente: nome || domain,
-      estrategia: estrategia || guessEstrategia(tipo),
-    }));
-
-    // Dry run = preview only
-    if (dryRun) {
-      return NextResponse.json({ ok: true, total: enriched.length, saved: 0, preview: enriched.slice(0, 20), dryRun: true });
-    }
-
-    // Save to Notion
-    if (enriched.length > 0) {
-      const results = await addBulkLeads(enriched);
-      const savedCount = results.filter(r => r.ok).length;
-
-      await addFonte({
-        nome: nome || domain,
-        tipo: tipo || "Lista",
-        url,
-        estrategia: estrategia || guessEstrategia(tipo),
-        leadsCount: savedCount,
+    // Add source info
+    var domain = "";
+    try { domain = new URL(url).hostname.replace("www.", ""); } catch(e) {}
+    companies = companies.map(function(c) {
+      return Object.assign({}, c, {
+        fuente: nome || domain,
+        estrategia: estrategia || "C - Eventos",
+        tipo: tipo || "Evento"
       });
+    });
 
-      return NextResponse.json({
-        ok: true,
-        total: enriched.length,
-        saved: savedCount,
-        errors: results.filter(r => !r.ok).length,
-        preview: enriched.slice(0, 10),
-        errorDetails: results.filter(r => !r.ok).slice(0, 5),
-      });
-    }
-
-    return NextResponse.json({ ok: true, total: 0, preview: [], message: "No se encontraron leads en esta URL. Prueba con otra página." });
+    return NextResponse.json({
+      ok: true,
+      total: companies.length,
+      preview: companies,
+      dryRun: dryRun || false
+    });
 
   } catch (e) {
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
 }
 
-// ============ EXTRACTORS ============
+function extractCompanies(html) {
+  var companies = [];
 
-function extractEventSpeakers(html) {
-  const leads = [];
+  // Pattern 1: Markdown-style links with ## headers (MERGE, event pages)
+  // [![Name](img)](url) or ## Name followed by link
+  var headerPattern = /##\s*([^\n#]+)/g;
+  var m;
+  while ((m = headerPattern.exec(html)) !== null) {
+    var name = clean(m[1]);
+    if (isJunk(name)) continue;
 
-  // Pattern: MERGE style — name in h2/h3 followed by role "em"/"at"/"en" company
-  // Example: "## Monica Long\nPresidente *em* **Ripple**"
-  const mergePattern = /##?\s*([\w\s\u00C0-\u024F\-\.]+)\n+([^*\n]+?)\s*\*?(?:em|at|en)\*?\s*\*{0,2}([^\n*]+)/g;
-  let m;
-  while ((m = mergePattern.exec(html)) !== null) {
-    const nome = clean(m[1]);
-    const cargo = clean(m[2]);
-    const empresa = clean(m[3]);
-    if (nome.length > 2 && nome.length < 60 && !isJunk(nome)) {
-      leads.push({ nome, cargo, empresa, persona: guessSpeakerPersona(cargo, empresa) });
+    // Look for URL near this match (within 500 chars before)
+    var contextBefore = html.substring(Math.max(0, m.index - 500), m.index);
+    var contextAfter = html.substring(m.index, m.index + 500);
+    var context = contextBefore + contextAfter;
+
+    // Find link
+    var linkMatch = context.match(/\]\((https?:\/\/[^\s\)]+)\)/);
+    var hrefMatch = context.match(/href="(https?:\/\/[^\s"]+)"/);
+    var siteUrl = "";
+    if (linkMatch) siteUrl = linkMatch[1];
+    else if (hrefMatch) siteUrl = hrefMatch[1];
+
+    // Extract domain from URL
+    var siteDomain = "";
+    if (siteUrl) {
+      try { siteDomain = new URL(siteUrl).hostname.replace("www.", ""); } catch(e) {}
     }
-  }
 
-  // Pattern: HTML speaker cards — <h2>Name</h2>..role..company
-  const htmlCardPattern = /<h[23][^>]*>\s*([\w\s\u00C0-\u024F\-\.]+)\s*<\/h[23]>[\s\S]{0,400}?(?:em|at|en|@)\s*(?:<[^>]*>)*\s*(?:<strong>|<b>)?\s*([\w\s\u00C0-\u024F\-\.&|]+)/gi;
-  while ((m = htmlCardPattern.exec(html)) !== null) {
-    const nome = clean(m[1]);
-    const empresa = clean(m[2]);
-    if (nome.length > 2 && nome.length < 60 && !isJunk(nome) && !leads.find(l => l.nome === nome)) {
-      leads.push({ nome, cargo: "", empresa });
-    }
-  }
+    // Skip if it looks like an image URL or internal nav
+    if (siteUrl && siteUrl.match(/\.(png|jpg|svg|webp|gif)$/i)) siteUrl = "";
+    if (siteDomain && siteDomain.match(/mmerge\.io|merge\.io/)) continue;
 
-  // Pattern: Smart Summit style — image alt + name + role + company in sequential divs
-  const ssPattern = /(?:alt="([^"]+)"[^>]*>[\s\S]{0,200})?<(?:h[2-4]|div|p)[^>]*class="[^"]*(?:name|speaker|title)[^"]*"[^>]*>\s*([\w\s\u00C0-\u024F\-\.]+)\s*<\/(?:h[2-4]|div|p)>[\s\S]{0,300}?(?:CEO|CTO|COO|CFO|Founder|Co-[Ff]ounder|Head|Director|Partner|VP|President|Managing|Lead|Manager|Presidente|Diretor)[^<]{0,100}/gi;
-  while ((m = ssPattern.exec(html)) !== null) {
-    const nome = clean(m[2] || m[1]);
-    if (nome && nome.length > 2 && nome.length < 60 && !isJunk(nome) && !leads.find(l => l.nome === nome)) {
-      const context = html.substring(m.index, m.index + 400);
-      const roleMatch = context.match(/(CEO|CTO|COO|CFO|Founder|Co-[Ff]ounder|Head[^<]{0,40}|Director[^<]{0,40}|Partner|VP[^<]{0,40}|President[a-e]*|Managing[^<]{0,40}|Lead[^<]{0,30})/i);
-      leads.push({ nome, cargo: roleMatch ? clean(roleMatch[1]) : "", empresa: "" });
-    }
-  }
+    // Detect sponsor tier from surrounding context
+    var tierContext = html.substring(Math.max(0, m.index - 2000), m.index).toLowerCase();
+    var tier = "";
+    if (tierContext.lastIndexOf("platinum") > tierContext.lastIndexOf("gold") &&
+        tierContext.lastIndexOf("platinum") > tierContext.lastIndexOf("silver")) tier = "Platinum";
+    else if (tierContext.lastIndexOf("gold") > tierContext.lastIndexOf("silver") &&
+             tierContext.lastIndexOf("gold") > tierContext.lastIndexOf("bronze")) tier = "Gold";
+    else if (tierContext.lastIndexOf("silver") > tierContext.lastIndexOf("bronze")) tier = "Silver";
+    else if (tierContext.lastIndexOf("bronze") > tierContext.lastIndexOf("startup")) tier = "Bronze";
+    else if (tierContext.lastIndexOf("startup") > tierContext.lastIndexOf("ecosystem")) tier = "Startup/VC";
+    else if (tierContext.lastIndexOf("ecosystem") > tierContext.lastIndexOf("education")) tier = "Ecosystem";
+    else if (tierContext.lastIndexOf("education") > -1) tier = "Educational";
+    else if (tierContext.lastIndexOf("media") > -1 || tierContext.lastIndexOf("pr ") > -1) tier = "Media";
 
-  return leads;
-}
-
-function extractAngelList(html) {
-  const leads = [];
-
-  // Pattern: Bold name followed by description — typical of El Referente articles
-  // <strong>Name</strong> followed by text about fundador/inversor/business angel
-  const boldNamePattern = /(?:<strong>|<b>|<h[2-4][^>]*>)\s*([\w\s\u00C0-\u024F\-\.]+?)\s*(?:<\/strong>|<\/b>|<\/h[2-4]>)/gi;
-  let m;
-  while ((m = boldNamePattern.exec(html)) !== null) {
-    const nome = clean(m[1]);
-    if (nome.length < 4 || nome.length > 50 || isJunk(nome)) continue;
-
-    // Look at context after the name (next 600 chars)
-    const context = html.substring(m.index, m.index + 800).toLowerCase();
-
-    // Must contain angel/investor/founder keywords
-    if (!/(fundador|inversor|business angel|emprendedor|cofundador|co-fundador|angel|investor|venture|portfolio)/i.test(context)) continue;
-
-    // Extract sector if mentioned
-    const setor = guessSectorFromText(context);
-
-    // Extract invested companies
-    const investedMatch = context.match(/(?:invert|invest|participad|portfolio|apuesta)[^.]*?(?:en\s+)?([\w\s,]+(?:,[\w\s]+){2,})/i);
-    const startups = investedMatch ? investedMatch[1].split(",").map(s => s.trim()).filter(s => s.length > 2) : [];
-
-    if (!leads.find(l => l.nome === nome)) {
-      leads.push({
-        nome,
-        cargo: "Business Angel / Inversor",
-        empresa: "",
-        setor: setor || "VC/Angel",
-        persona: "Derivado VC/Aceleradora",
-        notas: startups.length > 0 ? `Startups: ${startups.slice(0, 8).join(", ")}` : "",
+    if (name.length >= 2 && name.length < 80) {
+      companies.push({
+        nome: name,
+        website: siteUrl,
+        dominio: siteDomain,
+        tier: tier,
+        notas: tier ? "Tier: " + tier : ""
       });
     }
   }
 
-  return leads;
-}
-
-function extractGenericProfiles(html) {
-  const leads = [];
-
-  // Pattern: Name + C-level title anywhere on page
-  const cLevelPattern = /(?:<[^>]*>)\s*([\w\s\u00C0-\u024F\-\.]{3,40})\s*(?:<[^>]*>)[\s\S]{0,200}?((?:CEO|CTO|COO|CFO|Founder|Co-[Ff]ounder|Head of|Director|VP of|Partner at|Managing Director|General Manager)[^<]{0,60})/gi;
-  let m;
-  while ((m = cLevelPattern.exec(html)) !== null) {
-    const nome = clean(m[1]);
-    const cargo = clean(m[2]);
-    if (nome.length > 3 && nome.length < 45 && !isJunk(nome) && !leads.find(l => l.nome === nome)) {
-      leads.push({ nome, cargo, empresa: "" });
+  // Pattern 2: Bold names in articles (El Referente style)
+  if (companies.length === 0) {
+    var boldPattern = /(?:<strong>|<b>|<h[2-4][^>]*>)\s*([\w\s\u00C0-\u024F\-\.&]+?)\s*(?:<\/strong>|<\/b>|<\/h[2-4]>)/gi;
+    while ((m = boldPattern.exec(html)) !== null) {
+      var bName = clean(m[1]);
+      if (isJunk(bName) || bName.length < 3 || bName.length > 60) continue;
+      var bContext = html.substring(m.index, m.index + 600);
+      var bLink = bContext.match(/href="(https?:\/\/[^\s"]+)"/);
+      var bDomain = "";
+      var bUrl = "";
+      if (bLink) {
+        bUrl = bLink[1];
+        try { bDomain = new URL(bUrl).hostname.replace("www.", ""); } catch(e) {}
+      }
+      companies.push({ nome: bName, website: bUrl, dominio: bDomain, tier: "", notas: "" });
     }
   }
 
-  return leads;
+  // Pattern 3: Link lists - <a href="url">Name</a>
+  if (companies.length === 0) {
+    var linkPattern = /<a[^>]*href="(https?:\/\/[^"]+)"[^>]*>\s*([^<]{2,60})\s*<\/a>/gi;
+    while ((m = linkPattern.exec(html)) !== null) {
+      var lUrl = m[1];
+      var lName = clean(m[2]);
+      if (isJunk(lName)) continue;
+      var lDomain = "";
+      try { lDomain = new URL(lUrl).hostname.replace("www.", ""); } catch(e) {}
+      if (lDomain && !lDomain.match(/google|facebook|twitter|linkedin|instagram|youtube|github/)) {
+        companies.push({ nome: lName, website: lUrl, dominio: lDomain, tier: "", notas: "" });
+      }
+    }
+  }
+
+  return companies;
 }
 
-// ============ HELPERS ============
-
 function clean(s) {
-  return (s || "").replace(/<[^>]*>/g, "").replace(/\s+/g, " ").replace(/[*_#]/g, "").trim();
+  return (s || "").replace(/<[^>]*>/g, "").replace(/\s+/g, " ").replace(/[*_#\[\]]/g, "").trim();
 }
 
 function isJunk(name) {
-  const junk = /^(home|about|contact|menu|search|login|sign|cookie|privacy|terms|loading|undefined|null|image|photo|logo|icon|button|click|read more|ver más|saiba mais|learn more|more info)/i;
-  if (junk.test(name)) return true;
+  var junkWords = /^(home|about|contact|menu|search|login|sign|cookie|privacy|terms|loading|undefined|null|image|photo|logo|icon|button|click|read more|ver m|saiba mais|learn more|more info|voltar|next|prev|anterior|seguinte|ingressos|tickets|agenda|speakers|palestrantes|patrocinadores|sponsors|parceiros|partners|newsletter|subscribe|baixe|download|solicite|contato|faqs|submit|enviar|registr|comprar|buy|shop|explore|discover|see all|view all|show more|ver todos)$/i;
+  if (junkWords.test(name.trim())) return true;
   if (/^\d+$/.test(name)) return true;
-  if (name.split(" ").length > 6) return true;
-  if (name.length < 3) return true;
+  if (name.length < 2) return true;
+  if (name.split(" ").length > 8) return true;
   return false;
-}
-
-function guessSpeakerPersona(cargo, empresa) {
-  const c = (cargo + " " + empresa).toLowerCase();
-  if (/founder|co-founder|cofundador|ceo|fundador/.test(c)) return "Post-Ronda";
-  if (/head.*latam|country manager|regional|director.*latin|gm.*brazil/.test(c)) return "Expansor Multi-Región";
-  if (/angel|investor|vc|venture|capital|fund/.test(c)) return "Derivado VC/Aceleradora";
-  return "";
-}
-
-function guessSectorFromText(text) {
-  const t = text.toLowerCase();
-  if (/fintech|insurtech|banking|pagos|payment/.test(t)) return "Fintech";
-  if (/health|salud|médic|biotech|pharma/.test(t)) return "Healthtech";
-  if (/saas|b2b|software/.test(t)) return "SaaS B2B";
-  if (/crypto|blockchain|web3|bitcoin|token|defi/.test(t)) return "Web3/Crypto";
-  if (/ecommerce|retail|marketplace/.test(t)) return "Ecommerce";
-  if (/edtech|educación|formación/.test(t)) return "Edtech";
-  if (/legal|abogad|jurídic/.test(t)) return "Legaltech";
-  return "Otro";
-}
-
-function guessEstrategia(tipo) {
-  const map = { "Evento": "C - Eventos", "Benchmark": "A - Benchmark", "Job Board": "B - Job Board", "Aceleradora": "D - Coworkings", "VC Portfolio": "E - VCs/Angels", "Lista": "E - VCs/Angels", "Notícia": "F - Newsletters" };
-  return map[tipo] || "C - Eventos";
 }

@@ -1,120 +1,57 @@
 "use client";
 import { useState, useEffect } from "react";
 
-const PERSONAS = ["Expansor Multi-Region","Hueco Operativo","Post-Ronda","Derivado VC/Aceleradora","Heavy-Contracts B2B"];
-const ESTRATEGIAS = ["A - Benchmark","B - Job Board","C - Eventos","D - Coworkings","E - VCs/Angels","F - Newsletters"];
-const PIPELINES = ["Nuevo","Investigado","Contactado","Respondio","Reunion","Propuesta","Convertido","Perdido"];
-const PIPE_COLORS = {Nuevo:"#9e9e9e",Investigado:"#fbc02d",Contactado:"#ff9800",Respondio:"#2196f3",Reunion:"#7c4dff",Propuesta:"#e91e63",Convertido:"#4caf50",Perdido:"#f44336"};
-const PAISES = ["Espana","Brasil","Argentina","USA","UK","Mexico","Colombia","Otro"];
-const SETORES = ["Fintech","SaaS B2B","Healthtech","Web3/Crypto","Insurtech","Edtech","Ecommerce","Legaltech","VC/Angel","Aceleradora","Otro"];
-const ESTAGIOS = ["Pre-Seed","Seed","Series A","Series B+","Growth","Establecida"];
-const TIPOS_FONTE = ["Evento","Lista","Noticia","Aceleradora","VC Portfolio","Job Board","Benchmark"];
+var ESTRATEGIAS = ["A - Benchmark","B - Job Board","C - Eventos","D - Coworkings","E - VCs/Angels","F - Newsletters"];
+var PIPELINES = ["Nuevo","Investigado","Contactado","Respondio","Reunion","Propuesta","Convertido","Perdido"];
+var PIPE_COLORS = {Nuevo:"#9e9e9e",Investigado:"#fbc02d",Contactado:"#ff9800",Respondio:"#2196f3",Reunion:"#7c4dff",Propuesta:"#e91e63",Convertido:"#4caf50",Perdido:"#f44336"};
+var TIPOS_FONTE = ["Evento","Lista","Noticia","Aceleradora","VC Portfolio","Job Board","Benchmark"];
+var PERSONAS = ["Expansor Multi-Region","Hueco Operativo","Post-Ronda","Derivado VC/Aceleradora","Heavy-Contracts B2B"];
 
 export default function App() {
-  const [page, setPage] = useState("dashboard");
-  const [leads, setLeads] = useState([]);
-  const [stats, setStats] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [msg, setMsg] = useState(null);
-  const [importUrl, setImportUrl] = useState("");
-  const [importTipo, setImportTipo] = useState("Evento");
-  const [importEstrategia, setImportEstrategia] = useState("C - Eventos");
-  const [importNome, setImportNome] = useState("");
-  const [importResult, setImportResult] = useState(null);
-  const [importing, setImporting] = useState(false);
-  const [previewLeads, setPreviewLeads] = useState(null);
-  const [ml, setMl] = useState({});
-  const [pipeF, setPipeF] = useState("");
-  const [persF, setPersF] = useState("");
-  const [stratF, setStratF] = useState("");
-  const [searchQ, setSearchQ] = useState("");
+  var s = useState("dashboard"); var page = s[0]; var setPage = s[1];
+  var s2 = useState(null); var stats = s2[0]; var setStats = s2[1];
+  var s3 = useState(null); var msg = s3[0]; var setMsg = s3[1];
 
-  const loadStats = async () => { try { const r = await fetch("/api/leads?stats=true"); setStats(await r.json()); } catch(e) { console.error(e); } };
-  const loadLeads = async () => { setLoading(true); try { const r = await fetch("/api/leads"); const d = await r.json(); if (Array.isArray(d)) setLeads(d); } catch(e) { console.error(e); } setLoading(false); };
-
-  useEffect(() => { loadStats(); }, []);
-  useEffect(() => { if (msg) { const t = setTimeout(() => setMsg(null), 4000); return () => clearTimeout(t); } }, [msg]);
-
-  const doPreview = async () => {
-    if (!importUrl) return;
-    setImporting(true); setImportResult(null); setPreviewLeads(null);
-    try {
-      const r = await fetch("/api/scrape", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: importUrl, tipo: importTipo, estrategia: importEstrategia, nome: importNome, dryRun: true }) });
-      const data = await r.json();
-      if (data.error) { setImportResult({ error: data.error }); } else { setPreviewLeads(data.preview || []); setImportResult({ total: data.total, dryRun: true }); }
-    } catch (e) { setImportResult({ error: e.message }); }
-    setImporting(false);
-  };
-
-  const doImport = async () => {
-    if (!importUrl) return;
-    setImporting(true);
-    try {
-      const r = await fetch("/api/scrape", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: importUrl, tipo: importTipo, estrategia: importEstrategia, nome: importNome, dryRun: false }) });
-      const data = await r.json();
-      setImportResult(data); setPreviewLeads(null);
-      if (data.ok && data.saved > 0) { setMsg({ type: "ok", text: data.saved + " leads importados al Notion" }); loadStats(); }
-    } catch (e) { setImportResult({ error: e.message }); }
-    setImporting(false);
-  };
-
-  const doManual = async () => {
-    if (!ml.nome) return;
-    setLoading(true);
-    try {
-      const r = await fetch("/api/leads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(ml) });
-      const data = await r.json();
-      if (data.ok) { setMsg({ type: "ok", text: "Lead creado" }); setMl({}); loadStats(); }
-    } catch (e) { setMsg({ type: "err", text: e.message }); }
-    setLoading(false);
-  };
-
-  const updatePipe = async (id, pipeline) => {
-    try { await fetch("/api/leads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "updatePipeline", id, pipeline }) }); setLeads(function(prev) { return prev.map(function(l) { return l.id === id ? Object.assign({}, l, { pipeline: pipeline }) : l; }); }); } catch(e) { console.error(e); }
-  };
-
-  const fLeads = leads.filter(function(l) {
-    if (pipeF && l.pipeline !== pipeF) return false;
-    if (persF && l.persona !== persF) return false;
-    if (stratF && l.estrategia !== stratF) return false;
-    if (searchQ) { var q = searchQ.toLowerCase(); if (l.nome.toLowerCase().indexOf(q) === -1 && l.empresa.toLowerCase().indexOf(q) === -1 && l.cargo.toLowerCase().indexOf(q) === -1) return false; }
-    return true;
-  });
+  var loadStats = function() { fetch("/api/leads?stats=true").then(function(r) { return r.json(); }).then(setStats).catch(function() {}); };
+  useEffect(function() { loadStats(); }, []);
+  useEffect(function() { if (msg) { var t = setTimeout(function() { setMsg(null); }, 4000); return function() { clearTimeout(t); }; } }, [msg]);
 
   return (
     <div style={{ display: "flex", minHeight: "100vh" }}>
-      <div style={{ width: 220, background: "#003366", color: "white", padding: "24px 0", flexShrink: 0, display: "flex", flexDirection: "column" }}>
+      <div style={{ width: 220, background: "#003366", color: "white", padding: "24px 0", flexShrink: 0 }}>
         <div style={{ padding: "0 20px", marginBottom: 32 }}>
           <div style={{ fontSize: 22, fontWeight: 800 }}>lawi</div>
           <div style={{ fontSize: 11, color: "#00B8A9", fontWeight: 600 }}>leads engine</div>
         </div>
-        <NavBtn label="Dashboard" icon="+" active={page === "dashboard"} onClick={function() { setPage("dashboard"); loadStats(); }} />
-        <NavBtn label="Importar Leads" icon=">" active={page === "import"} onClick={function() { setPage("import"); }} />
-        <NavBtn label="Pipeline" icon="=" active={page === "pipeline"} onClick={function() { setPage("pipeline"); loadLeads(); }} />
-        <NavBtn label="Templates" icon="#" active={page === "templates"} onClick={function() { setPage("templates"); }} />
+        <NavBtn label="Dashboard" active={page === "dashboard"} onClick={function() { setPage("dashboard"); loadStats(); }} />
+        <NavBtn label="Importar Empresas" active={page === "import"} onClick={function() { setPage("import"); }} />
+        <NavBtn label="Empresas" active={page === "empresas"} onClick={function() { setPage("empresas"); }} />
+        <NavBtn label="Pipeline Leads" active={page === "pipeline"} onClick={function() { setPage("pipeline"); }} />
+        <NavBtn label="Templates" active={page === "templates"} onClick={function() { setPage("templates"); }} />
       </div>
-
-      <div style={{ flex: 1, padding: 32, maxWidth: 1100, overflow: "auto" }}>
+      <div style={{ flex: 1, padding: 32, maxWidth: 1200, overflow: "auto" }}>
         {msg ? <div style={{ position: "fixed", top: 20, right: 20, background: msg.type === "ok" ? "#4caf50" : "#f44336", color: "white", padding: "12px 20px", borderRadius: 10, fontSize: 14, fontWeight: 600, zIndex: 100 }}>{msg.text}</div> : null}
-
         {page === "dashboard" ? <DashboardPage stats={stats} /> : null}
-        {page === "import" ? <ImportPage importUrl={importUrl} setImportUrl={setImportUrl} importNome={importNome} setImportNome={setImportNome} importTipo={importTipo} setImportTipo={setImportTipo} importEstrategia={importEstrategia} setImportEstrategia={setImportEstrategia} importing={importing} doPreview={doPreview} doImport={doImport} previewLeads={previewLeads} importResult={importResult} ml={ml} setMl={setMl} doManual={doManual} loading={loading} /> : null}
-        {page === "pipeline" ? <PipelinePage fLeads={fLeads} loading={loading} loadLeads={loadLeads} searchQ={searchQ} setSearchQ={setSearchQ} pipeF={pipeF} setPipeF={setPipeF} persF={persF} setPersF={setPersF} stratF={stratF} setStratF={setStratF} updatePipe={updatePipe} /> : null}
+        {page === "import" ? <ImportPage setMsg={setMsg} loadStats={loadStats} /> : null}
+        {page === "empresas" ? <EmpresasPage setMsg={setMsg} /> : null}
+        {page === "pipeline" ? <PipelinePage /> : null}
         {page === "templates" ? <TemplatesPage /> : null}
       </div>
     </div>
   );
 }
 
-function DashboardPage({ stats }) {
-  if (!stats) return <div><h1 style={{ fontSize: 22, fontWeight: 700, color: "#003366", marginBottom: 20 }}>Dashboard</h1><p style={{ color: "#888" }}>Cargando...</p></div>;
+// ============ DASHBOARD ============
+function DashboardPage(props) {
+  var stats = props.stats;
+  if (!stats) return <div><h1 style={h1St}>Dashboard</h1><p style={{ color: "#888" }}>Cargando...</p></div>;
   return (
     <div>
-      <h1 style={{ fontSize: 22, fontWeight: 700, color: "#003366", marginBottom: 20 }}>Dashboard</h1>
+      <h1 style={h1St}>Dashboard</h1>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 14, marginBottom: 24 }}>
-        <StatCard label="Total Leads" value={stats.total} color="#003366" />
+        <StatCard label="Leads" value={stats.total} color="#003366" />
+        <StatCard label="Empresas" value={stats.empresas || 0} color="#00B8A9" />
         <StatCard label="Nuevos" value={(stats.byPipeline || {}).Nuevo || 0} color="#9e9e9e" />
-        <StatCard label="Contactados" value={(stats.byPipeline || {}).Contactado || 0} color="#ff9800" />
         <StatCard label="Reuniones" value={(stats.byPipeline || {}).Reunion || 0} color="#7c4dff" />
         <StatCard label="Convertidos" value={(stats.byPipeline || {}).Convertido || 0} color="#4caf50" />
       </div>
@@ -127,97 +64,223 @@ function DashboardPage({ stats }) {
   );
 }
 
-function ImportPage({ importUrl, setImportUrl, importNome, setImportNome, importTipo, setImportTipo, importEstrategia, setImportEstrategia, importing, doPreview, doImport, previewLeads, importResult, ml, setMl, doManual, loading }) {
+// ============ IMPORT EMPRESAS ============
+function ImportPage(props) {
+  var s1 = useState(""); var importUrl = s1[0]; var setImportUrl = s1[1];
+  var s2 = useState(""); var importNome = s2[0]; var setImportNome = s2[1];
+  var s3 = useState("Evento"); var importTipo = s3[0]; var setImportTipo = s3[1];
+  var s4 = useState("C - Eventos"); var importEst = s4[0]; var setImportEst = s4[1];
+  var s5 = useState(false); var loading = s5[0]; var setLoading = s5[1];
+  var s6 = useState(null); var preview = s6[0]; var setPreview = s6[1];
+  var s7 = useState(false); var enriching = s7[0]; var setEnriching = s7[1];
+  var s8 = useState(null); var result = s8[0]; var setResult = s8[1];
+  var s9 = useState(0); var enrichProgress = s9[0]; var setEnrichProgress = s9[1];
+
+  var doPreview = function() {
+    if (!importUrl) return;
+    setLoading(true); setPreview(null); setResult(null);
+    fetch("/api/scrape", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: importUrl, tipo: importTipo, estrategia: importEst, nome: importNome, dryRun: true }) })
+      .then(function(r) { return r.json(); })
+      .then(function(data) { if (data.error) { setResult({ error: data.error }); } else { setPreview(data.preview || []); } })
+      .catch(function(e) { setResult({ error: e.message }); })
+      .finally(function() { setLoading(false); });
+  };
+
+  var doEnrich = function() {
+    if (!preview || preview.length === 0) return;
+    var withDomain = preview.filter(function(c) { return c.dominio; });
+    if (withDomain.length === 0) { props.setMsg({ type: "err", text: "Nenhuma empresa tem dominio para enriquecer" }); return; }
+    setEnriching(true); setEnrichProgress(0);
+    fetch("/api/apollo", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ companies: withDomain }) })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.error) { props.setMsg({ type: "err", text: "Apollo: " + data.error }); return; }
+        // Merge enriched data back into preview
+        var enriched = data.data || [];
+        var enrichMap = {};
+        for (var i = 0; i < enriched.length; i++) { enrichMap[enriched[i].dominio] = enriched[i]; }
+        var updated = preview.map(function(c) {
+          if (c.dominio && enrichMap[c.dominio]) return enrichMap[c.dominio];
+          return c;
+        });
+        setPreview(updated);
+        props.setMsg({ type: "ok", text: (data.enriched || 0) + " empresas enriquecidas com Apollo" });
+      })
+      .catch(function(e) { props.setMsg({ type: "err", text: e.message }); })
+      .finally(function() { setEnriching(false); });
+  };
+
+  var doImport = function() {
+    if (!preview || preview.length === 0) return;
+    setLoading(true);
+    fetch("/api/leads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "importEmpresas", empresas: preview, fonte: { nome: importNome || importUrl, tipo: importTipo, url: importUrl, estrategia: importEst } }) })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.ok) {
+          setResult(data);
+          props.setMsg({ type: "ok", text: data.saved + " empresas salvas no Notion" });
+          props.loadStats();
+        }
+      })
+      .catch(function(e) { setResult({ error: e.message }); })
+      .finally(function() { setLoading(false); });
+  };
+
   return (
     <div>
-      <h1 style={{ fontSize: 22, fontWeight: 700, color: "#003366", marginBottom: 20 }}>Importar Leads</h1>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
-        <Card title="Importar por URL">
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <Field label="URL de la fuente *" value={importUrl} onChange={setImportUrl} placeholder="https://..." />
-            <Field label="Nombre" value={importNome} onChange={setImportNome} placeholder="Ej: MERGE SP 2026 Speakers" />
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-              <Select label="Tipo" value={importTipo} onChange={setImportTipo} options={TIPOS_FONTE} />
-              <Select label="Estrategia" value={importEstrategia} onChange={setImportEstrategia} options={ESTRATEGIAS} />
-            </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button onClick={doPreview} disabled={importing || !importUrl} style={{ flex: 1, padding: 12, background: importUrl ? "#003366" : "#ddd", color: "white", border: "none", borderRadius: 8, fontWeight: 600, fontSize: 13 }}>{importing ? "Buscando..." : "Preview"}</button>
-              {previewLeads && previewLeads.length > 0 ? <button onClick={doImport} disabled={importing} style={{ flex: 1, padding: 12, background: "#4caf50", color: "white", border: "none", borderRadius: 8, fontWeight: 600, fontSize: 13 }}>{"Importar " + previewLeads.length + " leads"}</button> : null}
-            </div>
-            {previewLeads && previewLeads.length > 0 ? (
-              <div style={{ background: "#f8fffe", border: "2px solid #00B8A9", borderRadius: 10, padding: 12, maxHeight: 400, overflow: "auto" }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: "#00B8A9", marginBottom: 8 }}>{"Preview: " + previewLeads.length + " leads encontrados"}</div>
-                <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
-                  <thead><tr style={{ borderBottom: "2px solid #e0e0e0" }}><th style={thSt}>Nombre</th><th style={thSt}>Cargo</th><th style={thSt}>Empresa</th><th style={thSt}>Persona</th></tr></thead>
-                  <tbody>{previewLeads.map(function(l, i) { return <tr key={i} style={{ borderBottom: "1px solid #f0f0f0" }}><td style={tdSt}>{l.nome}</td><td style={Object.assign({}, tdSt, { color: "#666" })}>{l.cargo}</td><td style={tdSt}>{l.empresa}</td><td style={tdSt}>{l.persona || ""}</td></tr>; })}</tbody>
-                </table>
-              </div>
-            ) : null}
-            {previewLeads && previewLeads.length === 0 ? <div style={{ background: "#fff3e0", borderRadius: 8, padding: 12, fontSize: 13, color: "#E65100" }}>No se encontraron leads en esta URL.</div> : null}
-            {importResult && !importResult.dryRun ? (
-              <div style={{ background: importResult.error ? "#ffebee" : "#e8f5e9", borderRadius: 8, padding: 12, fontSize: 13 }}>
-                {importResult.error ? <span style={{ color: "#c62828" }}>{"Error: " + importResult.error}</span> : <span style={{ color: "#2E7D32" }}>{importResult.saved + " leads guardados en Notion"}</span>}
-              </div>
-            ) : null}
+      <h1 style={h1St}>Importar Empresas</h1>
+      <Card title="Scrape + Enrich">
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
+          <Field label="URL da fonte *" value={importUrl} onChange={setImportUrl} placeholder="https://www.mmerge.io/pt/.../sponsors_partners" />
+          <Field label="Nome da fonte" value={importNome} onChange={setImportNome} placeholder="Ex: MERGE SP 2026 Sponsors" />
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 2fr", gap: 12, marginBottom: 16 }}>
+          <Select label="Tipo" value={importTipo} onChange={setImportTipo} options={TIPOS_FONTE} />
+          <Select label="Estrategia" value={importEst} onChange={setImportEst} options={ESTRATEGIAS} />
+          <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+            <button onClick={doPreview} disabled={loading || !importUrl} style={btnStyle(importUrl ? "#003366" : "#ddd")}>{loading ? "Buscando..." : "1. Preview"}</button>
+            <button onClick={doEnrich} disabled={enriching || !preview || preview.length === 0} style={btnStyle(preview && preview.length > 0 ? "#ff9800" : "#ddd")}>{enriching ? "Enriquecendo..." : "2. Apollo Enrich"}</button>
+            <button onClick={doImport} disabled={loading || !preview || preview.length === 0} style={btnStyle(preview && preview.length > 0 ? "#4caf50" : "#ddd")}>{loading ? "Salvando..." : "3. Salvar no Notion"}</button>
           </div>
-        </Card>
-        <Card title="Agregar manualmente">
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <Field label="Nombre *" value={ml.nome || ""} onChange={function(v) { setMl(function(p) { return Object.assign({}, p, { nome: v }); }); }} />
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-              <Field label="Cargo" value={ml.cargo || ""} onChange={function(v) { setMl(function(p) { return Object.assign({}, p, { cargo: v }); }); }} />
-              <Field label="Empresa" value={ml.empresa || ""} onChange={function(v) { setMl(function(p) { return Object.assign({}, p, { empresa: v }); }); }} />
+        </div>
+
+        {preview && preview.length > 0 ? (
+          <div style={{ border: "2px solid #00B8A9", borderRadius: 10, overflow: "hidden" }}>
+            <div style={{ background: "#00B8A9", color: "white", padding: "8px 16px", fontSize: 13, fontWeight: 600 }}>{preview.length + " empresas encontradas"}</div>
+            <div style={{ maxHeight: 500, overflow: "auto" }}>
+              <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
+                <thead><tr style={{ background: "#f5f5f5", position: "sticky", top: 0 }}>
+                  <th style={thSt}>Empresa</th>
+                  <th style={thSt}>Dominio</th>
+                  <th style={thSt}>Setor</th>
+                  <th style={thSt}>Pais</th>
+                  <th style={thSt}>Tamanho</th>
+                  <th style={thSt}>Funding</th>
+                </tr></thead>
+                <tbody>{preview.map(function(c, i) {
+                  return <tr key={i} style={{ borderBottom: "1px solid #f0f0f0" }}>
+                    <td style={Object.assign({}, tdSt, { fontWeight: 600 })}>{c.nome}</td>
+                    <td style={tdSt}>{c.dominio ? <a href={"https://" + c.dominio} target="_blank" rel="noreferrer" style={{ color: "#1565C0", textDecoration: "none" }}>{c.dominio}</a> : <span style={{ color: "#ccc" }}>--</span>}</td>
+                    <td style={tdSt}>{c.setor ? <span style={{ background: "#e8f5e9", color: "#2E7D32", padding: "2px 6px", borderRadius: 4, fontSize: 11 }}>{c.setor}</span> : <span style={{ color: "#ccc" }}>--</span>}</td>
+                    <td style={tdSt}>{c.pais || <span style={{ color: "#ccc" }}>--</span>}</td>
+                    <td style={tdSt}>{c.tamanoLabel || <span style={{ color: "#ccc" }}>--</span>}</td>
+                    <td style={tdSt}>{c.funding || <span style={{ color: "#ccc" }}>--</span>}</td>
+                  </tr>;
+                })}</tbody>
+              </table>
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-              <Field label="Email" value={ml.email || ""} onChange={function(v) { setMl(function(p) { return Object.assign({}, p, { email: v }); }); }} />
-              <Field label="LinkedIn" value={ml.linkedin || ""} onChange={function(v) { setMl(function(p) { return Object.assign({}, p, { linkedin: v }); }); }} />
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
-              <Select label="Pais" value={ml.pais || ""} onChange={function(v) { setMl(function(p) { return Object.assign({}, p, { pais: v }); }); }} options={PAISES} empty="--" />
-              <Select label="Setor" value={ml.setor || ""} onChange={function(v) { setMl(function(p) { return Object.assign({}, p, { setor: v }); }); }} options={SETORES} empty="--" />
-              <Select label="Estagio" value={ml.estagio || ""} onChange={function(v) { setMl(function(p) { return Object.assign({}, p, { estagio: v }); }); }} options={ESTAGIOS} empty="--" />
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-              <Select label="Persona" value={ml.persona || ""} onChange={function(v) { setMl(function(p) { return Object.assign({}, p, { persona: v }); }); }} options={PERSONAS} empty="--" />
-              <Select label="Estrategia" value={ml.estrategia || ""} onChange={function(v) { setMl(function(p) { return Object.assign({}, p, { estrategia: v }); }); }} options={ESTRATEGIAS} empty="--" />
-            </div>
-            <Field label="Notas" value={ml.notas || ""} onChange={function(v) { setMl(function(p) { return Object.assign({}, p, { notas: v }); }); }} textarea={true} />
-            <button onClick={doManual} disabled={!ml.nome || loading} style={{ padding: 12, background: ml.nome ? "#00B8A9" : "#ddd", color: "white", border: "none", borderRadius: 8, fontWeight: 600, fontSize: 14 }}>Guardar Lead</button>
           </div>
-        </Card>
-      </div>
+        ) : null}
+
+        {preview && preview.length === 0 ? <div style={{ background: "#fff3e0", borderRadius: 8, padding: 12, fontSize: 13, color: "#E65100" }}>Nenhuma empresa encontrada nesta URL.</div> : null}
+
+        {result && !result.error && result.saved ? <div style={{ background: "#e8f5e9", borderRadius: 8, padding: 12, fontSize: 13, color: "#2E7D32", marginTop: 12 }}>{result.saved + " empresas salvas no Notion"}</div> : null}
+        {result && result.error ? <div style={{ background: "#ffebee", borderRadius: 8, padding: 12, fontSize: 13, color: "#c62828", marginTop: 12 }}>{"Erro: " + result.error}</div> : null}
+      </Card>
     </div>
   );
 }
 
-function PipelinePage({ fLeads, loading, loadLeads, searchQ, setSearchQ, pipeF, setPipeF, persF, setPersF, stratF, setStratF, updatePipe }) {
+// ============ EMPRESAS LIST ============
+function EmpresasPage(props) {
+  var s1 = useState([]); var empresas = s1[0]; var setEmpresas = s1[1];
+  var s2 = useState(true); var loading = s2[0]; var setLoading = s2[1];
+  var s3 = useState(""); var searchQ = s3[0]; var setSearchQ = s3[1];
+  var s4 = useState(""); var setorF = s4[0]; var setSetorF = s4[1];
+
+  var load = function() { setLoading(true); fetch("/api/leads?type=empresas").then(function(r) { return r.json(); }).then(function(d) { if (Array.isArray(d)) setEmpresas(d); }).catch(function() {}).finally(function() { setLoading(false); }); };
+  useEffect(function() { load(); }, []);
+
+  var setores = {};
+  for (var i = 0; i < empresas.length; i++) { if (empresas[i].setor) setores[empresas[i].setor] = true; }
+  var setorList = Object.keys(setores).sort();
+
+  var filtered = empresas.filter(function(e) {
+    if (setorF && e.setor !== setorF) return false;
+    if (searchQ) { var q = searchQ.toLowerCase(); return e.nome.toLowerCase().indexOf(q) >= 0 || (e.dominio || "").toLowerCase().indexOf(q) >= 0 || (e.industria || "").toLowerCase().indexOf(q) >= 0; }
+    return true;
+  });
+
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-        <h1 style={{ fontSize: 22, fontWeight: 700, color: "#003366" }}>Pipeline</h1>
-        <button onClick={loadLeads} style={{ padding: "8px 16px", background: "#003366", color: "white", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 600 }}>Actualizar</button>
+        <h1 style={{ fontSize: 22, fontWeight: 700, color: "#003366" }}>Empresas</h1>
+        <button onClick={load} style={{ padding: "8px 16px", background: "#003366", color: "white", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 600 }}>Atualizar</button>
       </div>
-      <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
         <input value={searchQ} onChange={function(e) { setSearchQ(e.target.value); }} placeholder="Buscar..." style={inputSt} />
-        <select value={pipeF} onChange={function(e) { setPipeF(e.target.value); }} style={selectSt}><option value="">Estado</option>{PIPELINES.map(function(p) { return <option key={p} value={p}>{p}</option>; })}</select>
-        <select value={persF} onChange={function(e) { setPersF(e.target.value); }} style={selectSt}><option value="">Persona</option>{PERSONAS.map(function(p) { return <option key={p} value={p}>{p}</option>; })}</select>
-        <select value={stratF} onChange={function(e) { setStratF(e.target.value); }} style={selectSt}><option value="">Estrategia</option>{ESTRATEGIAS.map(function(p) { return <option key={p} value={p}>{p}</option>; })}</select>
-        <span style={{ fontSize: 12, color: "#888", alignSelf: "center" }}>{fLeads.length + " leads"}</span>
+        <select value={setorF} onChange={function(e) { setSetorF(e.target.value); }} style={selectSt}><option value="">Todos os setores</option>{setorList.map(function(s) { return <option key={s} value={s}>{s}</option>; })}</select>
+        <span style={{ fontSize: 12, color: "#888", alignSelf: "center" }}>{filtered.length + " empresas"}</span>
       </div>
       {loading ? <p>Cargando...</p> : (
         <div>
-          {fLeads.length === 0 ? <p style={{ color: "#aaa" }}>No hay leads. Importa algunos primero.</p> : null}
-          {fLeads.map(function(l) {
+          {filtered.length === 0 ? <p style={{ color: "#aaa" }}>Nenhuma empresa encontrada. Importe algumas primeiro.</p> : null}
+          {filtered.map(function(e) {
+            return (
+              <div key={e.id} style={{ background: "white", borderRadius: 10, padding: "12px 16px", marginBottom: 6, display: "flex", alignItems: "center", gap: 12, boxShadow: "0 1px 3px rgba(0,0,0,0.04)", borderLeft: "4px solid #00B8A9" }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 600, fontSize: 14 }}>{e.nome}</div>
+                  <div style={{ fontSize: 12, color: "#666" }}>
+                    {e.dominio ? <a href={"https://" + e.dominio} target="_blank" rel="noreferrer" style={{ color: "#1565C0", textDecoration: "none" }}>{e.dominio}</a> : null}
+                    {e.descricao ? <span style={{ marginLeft: 8, color: "#999" }}>{e.descricao.substring(0, 100)}</span> : null}
+                  </div>
+                </div>
+                {e.setor ? <span style={{ background: "#e8f5e9", color: "#2E7D32", padding: "3px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600 }}>{e.setor}</span> : null}
+                {e.pais ? <span style={{ background: "#e3f2fd", color: "#1565C0", padding: "3px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600 }}>{e.pais}</span> : null}
+                {e.tamanoLabel ? <span style={{ background: "#fff3e0", color: "#E65100", padding: "3px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600 }}>{e.tamanoLabel}</span> : null}
+                {e.funding ? <span style={{ background: "#f3e5f5", color: "#7B1FA2", padding: "3px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600 }}>{e.funding}</span> : null}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============ PIPELINE LEADS ============
+function PipelinePage() {
+  var s1 = useState([]); var leads = s1[0]; var setLeads = s1[1];
+  var s2 = useState(true); var loading = s2[0]; var setLoading = s2[1];
+  var s3 = useState(""); var searchQ = s3[0]; var setSearchQ = s3[1];
+  var s4 = useState(""); var pipeF = s4[0]; var setPipeF = s4[1];
+
+  var load = function() { setLoading(true); fetch("/api/leads").then(function(r) { return r.json(); }).then(function(d) { if (Array.isArray(d)) setLeads(d); }).catch(function() {}).finally(function() { setLoading(false); }); };
+  useEffect(function() { load(); }, []);
+
+  var updatePipe = function(id, pipeline) {
+    fetch("/api/leads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "updatePipeline", id: id, pipeline: pipeline }) }).catch(function() {});
+    setLeads(function(prev) { return prev.map(function(l) { return l.id === id ? Object.assign({}, l, { pipeline: pipeline }) : l; }); });
+  };
+
+  var filtered = leads.filter(function(l) {
+    if (pipeF && l.pipeline !== pipeF) return false;
+    if (searchQ) { var q = searchQ.toLowerCase(); return l.nome.toLowerCase().indexOf(q) >= 0 || l.empresa.toLowerCase().indexOf(q) >= 0; }
+    return true;
+  });
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <h1 style={{ fontSize: 22, fontWeight: 700, color: "#003366" }}>Pipeline Leads</h1>
+        <button onClick={load} style={{ padding: "8px 16px", background: "#003366", color: "white", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 600 }}>Atualizar</button>
+      </div>
+      <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+        <input value={searchQ} onChange={function(e) { setSearchQ(e.target.value); }} placeholder="Buscar..." style={inputSt} />
+        <select value={pipeF} onChange={function(e) { setPipeF(e.target.value); }} style={selectSt}><option value="">Todos</option>{PIPELINES.map(function(p) { return <option key={p} value={p}>{p}</option>; })}</select>
+        <span style={{ fontSize: 12, color: "#888", alignSelf: "center" }}>{filtered.length + " leads"}</span>
+      </div>
+      {loading ? <p>Cargando...</p> : (
+        <div>
+          {filtered.length === 0 ? <p style={{ color: "#aaa" }}>No hay leads.</p> : null}
+          {filtered.map(function(l) {
             return (
               <div key={l.id} style={{ background: "white", borderRadius: 10, padding: "12px 16px", marginBottom: 6, display: "flex", alignItems: "center", gap: 12, boxShadow: "0 1px 3px rgba(0,0,0,0.04)", borderLeft: "4px solid " + (PIPE_COLORS[l.pipeline] || "#ccc") }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontWeight: 600, fontSize: 14 }}>{l.nome}</div>
                   <div style={{ fontSize: 12, color: "#666" }}>{l.cargo}{l.cargo && l.empresa ? " - " : ""}{l.empresa}</div>
-                  {l.notas ? <div style={{ fontSize: 11, color: "#999", marginTop: 2 }}>{l.notas.substring(0, 80)}</div> : null}
                 </div>
-                {l.pais ? <span style={{ background: "#e3f2fd", color: "#1565C0", padding: "3px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600 }}>{l.pais}</span> : null}
-                {l.persona ? <span style={{ background: "#f3e5f5", color: "#7B1FA2", padding: "3px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600 }}>{l.persona.split(" ")[0]}</span> : null}
-                <select value={l.pipeline} onChange={function(e) { updatePipe(l.id, e.target.value); }} style={{ padding: "6px 8px", border: "2px solid " + (PIPE_COLORS[l.pipeline] || "#ccc"), borderRadius: 6, fontSize: 12, fontWeight: 600, color: PIPE_COLORS[l.pipeline] || "#333", background: "white", outline: "none", cursor: "pointer" }}>
+                <select value={l.pipeline} onChange={function(e) { updatePipe(l.id, e.target.value); }} style={{ padding: "6px 8px", border: "2px solid " + (PIPE_COLORS[l.pipeline] || "#ccc"), borderRadius: 6, fontSize: 12, fontWeight: 600, color: PIPE_COLORS[l.pipeline] || "#333", background: "white" }}>
                   {PIPELINES.map(function(p) { return <option key={p} value={p}>{p}</option>; })}
                 </select>
               </div>
@@ -229,24 +292,24 @@ function PipelinePage({ fLeads, loading, loadLeads, searchQ, setSearchQ, pipeF, 
   );
 }
 
+// ============ TEMPLATES ============
 function TemplatesPage() {
   var templates = [
-    { persona: "Expansor Multi-Region", est: "A/C", gancho: "Centralizamos tu operacion legal en Europa, US y LATAM por una fraccion del costo.", body: "Hola [Nombre],\n\nVi que [Empresa] opera en varios mercados. En Lawi ofrecemos un departamento legal centralizado para scaleups multi-region -- sin coordinar 3 o 4 estudios distintos.\n\nTe interesa una call de 15 min?\n\nSaludos" },
-    { persona: "Hueco Operativo", est: "B", gancho: "Departamento legal entero por menos que el costo de esa vacante.", body: "Hola [Nombre],\n\nNote que [Empresa] busca un Legal Counsel part-time. En Lawi ofrecemos Legal Department as a Service -- un equipo legal completo por menos presupuesto.\n\nConversamos?\n\nSaludos" },
-    { persona: "Post-Ronda", est: "E/F", gancho: "Legal as a Service para escalar seguros tras la ronda.", body: "Hola [Nombre],\n\nFelicitaciones por la ronda de [Empresa]! Sabemos que post-ronda los inversores exigen compliance estricto. En Lawi acompanamos startups en esa fase -- GDPR, ESOPs, pactos de socios -- por mucho menos que un Director Legal.\n\nAgendamos?\n\nSaludos" },
-    { persona: "Derivado VC/Aceleradora", est: "E", gancho: "El partner legal que tus startups necesitan pero no pueden pagar.", body: "Hola [Nombre],\n\nEn Lawi trabajamos como departamento legal tercerizado para startups tech. Nos encantaria ser el partner legal de referencia para el portfolio de [Fondo].\n\nPodemos conversar?\n\nSaludos" },
-    { persona: "Heavy-Contracts B2B", est: "A", gancho: "Tu CEO pierde 10h/semana revisando NDAs?", body: "Hola [Nombre],\n\nMuchas empresas SaaS B2B como [Empresa] pierden tiempo revisando contratos. En Lawi gestionamos todo el flujo contractual -- NDAs, MSAs, vendor agreements -- para que el equipo se enfoque en vender.\n\nHablamos?\n\nSaludos" },
+    { persona: "Expansor Multi-Region", est: "A/C", gancho: "Centralizamos tu operacion legal en Europa, US y LATAM.", body: "Hola [Nombre],\n\nVi que [Empresa] opera en varios mercados. En Lawi ofrecemos un departamento legal centralizado para scaleups multi-region -- sin coordinar 3 o 4 estudios distintos.\n\nTe interesa una call de 15 min?\n\nSaludos" },
+    { persona: "Hueco Operativo", est: "B", gancho: "Legal Department as a Service por menos que esa vacante.", body: "Hola [Nombre],\n\nNote que [Empresa] busca un Legal Counsel part-time. En Lawi ofrecemos LDFS -- un equipo legal completo por menos presupuesto.\n\nConversamos?\n\nSaludos" },
+    { persona: "Post-Ronda", est: "E/F", gancho: "Legal as a Service para escalar seguros tras la ronda.", body: "Hola [Nombre],\n\nFelicitaciones por la ronda de [Empresa]! En Lawi acompanamos startups post-ronda -- GDPR, ESOPs, pactos de socios -- por menos que un Director Legal.\n\nAgendamos?\n\nSaludos" },
+    { persona: "Derivado VC/Aceleradora", est: "E", gancho: "El partner legal que tus startups necesitan.", body: "Hola [Nombre],\n\nEn Lawi trabajamos como departamento legal tercerizado para startups tech. Nos encantaria ser el partner legal de referencia para el portfolio de [Fondo].\n\nPodemos conversar?\n\nSaludos" },
+    { persona: "Heavy-Contracts B2B", est: "A", gancho: "Tu CEO pierde 10h/semana revisando NDAs?", body: "Hola [Nombre],\n\nMuchas empresas SaaS B2B como [Empresa] pierden tiempo revisando contratos. En Lawi gestionamos todo -- NDAs, MSAs, vendor agreements.\n\nHablamos?\n\nSaludos" },
   ];
   return (
     <div>
-      <h1 style={{ fontSize: 22, fontWeight: 700, color: "#003366", marginBottom: 20 }}>Templates de Outreach</h1>
-      <p style={{ color: "#888", marginBottom: 16, fontSize: 14 }}>Mensajes listos por buyer persona. Clic en Copiar para usar.</p>
+      <h1 style={h1St}>Templates de Outreach</h1>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
         {templates.map(function(t, i) {
           return (
             <Card key={i} title={t.persona}>
               <div style={{ fontSize: 11, color: "#888", marginBottom: 6 }}>{"Estrategia: " + t.est}</div>
-              <div style={{ fontSize: 13, fontWeight: 600, color: "#E65100", marginBottom: 8 }}>{'"' + t.gancho + '"'}</div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: "#E65100", marginBottom: 8 }}>{t.gancho}</div>
               <pre style={{ fontSize: 12, color: "#333", lineHeight: 1.6, background: "#f9f9f9", borderRadius: 8, padding: 12, whiteSpace: "pre-wrap", fontFamily: "inherit" }}>{t.body}</pre>
               <button onClick={function() { if (navigator.clipboard) navigator.clipboard.writeText(t.body); }} style={{ marginTop: 8, padding: "6px 12px", background: "#003366", color: "white", border: "none", borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Copiar</button>
             </Card>
@@ -257,48 +320,50 @@ function TemplatesPage() {
   );
 }
 
-function NavBtn({ label, icon, active, onClick }) {
-  return <button onClick={onClick} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 20px", background: active ? "rgba(0,184,169,0.2)" : "transparent", color: active ? "#00B8A9" : "rgba(255,255,255,0.7)", border: "none", width: "100%", textAlign: "left", fontSize: 14, fontWeight: active ? 600 : 400, borderLeft: active ? "3px solid #00B8A9" : "3px solid transparent", cursor: "pointer" }}>{label}</button>;
+// ============ COMPONENTS ============
+function NavBtn(props) {
+  return <button onClick={props.onClick} style={{ display: "block", width: "100%", padding: "10px 20px", background: props.active ? "rgba(0,184,169,0.2)" : "transparent", color: props.active ? "#00B8A9" : "rgba(255,255,255,0.7)", border: "none", textAlign: "left", fontSize: 14, fontWeight: props.active ? 600 : 400, borderLeft: props.active ? "3px solid #00B8A9" : "3px solid transparent", cursor: "pointer" }}>{props.label}</button>;
 }
 
-function Card({ title, children }) {
-  return <div style={{ background: "white", borderRadius: 12, padding: 20, boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}><div style={{ fontSize: 14, fontWeight: 700, color: "#003366", marginBottom: 12 }}>{title}</div>{children}</div>;
+function Card(props) {
+  return <div style={{ background: "white", borderRadius: 12, padding: 20, boxShadow: "0 1px 4px rgba(0,0,0,0.06)", marginBottom: 16 }}><div style={{ fontSize: 14, fontWeight: 700, color: "#003366", marginBottom: 12 }}>{props.title}</div>{props.children}</div>;
 }
 
-function StatCard({ label, value, color }) {
-  return <div style={{ background: "white", borderRadius: 12, padding: 16, boxShadow: "0 1px 4px rgba(0,0,0,0.06)", borderTop: "3px solid " + color }}><div style={{ fontSize: 26, fontWeight: 800, color: color }}>{value}</div><div style={{ fontSize: 11, color: "#888", marginTop: 4 }}>{label}</div></div>;
+function StatCard(props) {
+  return <div style={{ background: "white", borderRadius: 12, padding: 16, boxShadow: "0 1px 4px rgba(0,0,0,0.06)", borderTop: "3px solid " + props.color }}><div style={{ fontSize: 26, fontWeight: 800, color: props.color }}>{props.value}</div><div style={{ fontSize: 11, color: "#888", marginTop: 4 }}>{props.label}</div></div>;
 }
 
-function DataTable({ data }) {
-  var entries = Object.entries(data || {});
+function DataTable(props) {
+  var entries = Object.entries(props.data || {});
   if (entries.length === 0) return <p style={{ color: "#aaa", fontSize: 13 }}>Sin datos</p>;
   return <div>{entries.map(function(e) { return <div key={e[0]} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid #f0f0f0", fontSize: 13 }}><span>{e[0]}</span><strong>{e[1]}</strong></div>; })}</div>;
 }
 
-function Field({ label, value, onChange, placeholder, textarea }) {
-  var st = { width: "100%", padding: "8px 10px", border: "2px solid #e8e8e8", borderRadius: 8, fontSize: 13, outline: "none", boxSizing: "border-box", fontFamily: "inherit" };
-  if (textarea) { st.resize = "vertical"; st.minHeight = 60; }
+function Field(props) {
   return (
     <div>
-      <div style={{ fontSize: 11, fontWeight: 600, color: "#888", marginBottom: 4 }}>{label}</div>
-      {textarea ? <textarea value={value || ""} onChange={function(e) { onChange(e.target.value); }} placeholder={placeholder} style={st} /> : <input value={value || ""} onChange={function(e) { onChange(e.target.value); }} placeholder={placeholder} style={st} />}
+      <div style={{ fontSize: 11, fontWeight: 600, color: "#888", marginBottom: 4 }}>{props.label}</div>
+      <input value={props.value || ""} onChange={function(e) { props.onChange(e.target.value); }} placeholder={props.placeholder} style={{ width: "100%", padding: "8px 10px", border: "2px solid #e8e8e8", borderRadius: 8, fontSize: 13, outline: "none", boxSizing: "border-box" }} />
     </div>
   );
 }
 
-function Select({ label, value, onChange, options, empty }) {
+function Select(props) {
   return (
     <div>
-      <div style={{ fontSize: 11, fontWeight: 600, color: "#888", marginBottom: 4 }}>{label}</div>
-      <select value={value || ""} onChange={function(e) { onChange(e.target.value); }} style={{ width: "100%", padding: "8px 10px", border: "2px solid #e8e8e8", borderRadius: 8, fontSize: 13, outline: "none", background: "white" }}>
-        {empty ? <option value="">{empty}</option> : null}
-        {options.map(function(o) { return <option key={o} value={o}>{o}</option>; })}
+      <div style={{ fontSize: 11, fontWeight: 600, color: "#888", marginBottom: 4 }}>{props.label}</div>
+      <select value={props.value || ""} onChange={function(e) { props.onChange(e.target.value); }} style={{ width: "100%", padding: "8px 10px", border: "2px solid #e8e8e8", borderRadius: 8, fontSize: 13, outline: "none", background: "white" }}>
+        {props.empty ? <option value="">{props.empty}</option> : null}
+        {props.options.map(function(o) { return <option key={o} value={o}>{o}</option>; })}
       </select>
     </div>
   );
 }
 
-var thSt = { textAlign: "left", padding: "4px 6px" };
-var tdSt = { padding: "4px 6px" };
+function btnStyle(bg) { return { padding: "10px 16px", background: bg, color: "white", border: "none", borderRadius: 8, fontWeight: 600, fontSize: 13, cursor: "pointer", whiteSpace: "nowrap" }; }
+
+var h1St = { fontSize: 22, fontWeight: 700, color: "#003366", marginBottom: 20 };
+var thSt = { textAlign: "left", padding: "8px 10px", fontSize: 12, fontWeight: 600 };
+var tdSt = { padding: "6px 10px" };
 var inputSt = { padding: "8px 12px", border: "2px solid #e0e0e0", borderRadius: 8, fontSize: 13, width: 220, outline: "none" };
 var selectSt = { padding: "8px 12px", border: "2px solid #e0e0e0", borderRadius: 8, fontSize: 13, outline: "none", background: "white" };
