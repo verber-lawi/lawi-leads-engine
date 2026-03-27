@@ -66,7 +66,17 @@ function DashboardPage(props) {
 
 // ============ IMPORT EMPRESAS ============
 function ImportPage(props) {
+  // Modo: "url" ou "pdf"
+  var sMode = useState("url"); var importMode = sMode[0]; var setImportMode = sMode[1];
+
+  // URL mode
   var s1 = useState(""); var importUrl = s1[0]; var setImportUrl = s1[1];
+
+  // PDF mode
+  var sPdf = useState(null); var pdfFile = sPdf[0]; var setPdfFile = sPdf[1];
+  var sPdfName = useState(""); var pdfFileName = sPdfName[0]; var setPdfFileName = sPdfName[1];
+
+  // Shared
   var s2 = useState(""); var importNome = s2[0]; var setImportNome = s2[1];
   var s3 = useState("Evento"); var importTipo = s3[0]; var setImportTipo = s3[1];
   var s4 = useState("C - Eventos"); var importEst = s4[0]; var setImportEst = s4[1];
@@ -74,7 +84,6 @@ function ImportPage(props) {
   var s6 = useState(null); var preview = s6[0]; var setPreview = s6[1];
   var s7 = useState(false); var enriching = s7[0]; var setEnriching = s7[1];
   var s8 = useState(null); var result = s8[0]; var setResult = s8[1];
-  var s9 = useState(0); var enrichProgress = s9[0]; var setEnrichProgress = s9[1];
 
   var doPreview = function() {
     if (!importUrl) return;
@@ -86,50 +95,49 @@ function ImportPage(props) {
       .finally(function() { setLoading(false); });
   };
 
+  var doPdfExtract = function() {
+    if (!pdfFile) return;
+    setLoading(true); setPreview(null); setResult(null);
+    var fd = new FormData();
+    fd.append("file", pdfFile);
+    fd.append("tipo", importTipo);
+    fd.append("estrategia", importEst);
+    fd.append("nome", importNome || pdfFileName);
+    fetch("/api/pdf", { method: "POST", body: fd })
+      .then(function(r) { return r.json(); })
+      .then(function(data) { if (data.error) { setResult({ error: data.error }); } else { setPreview(data.preview || []); } })
+      .catch(function(e) { setResult({ error: e.message }); })
+      .finally(function() { setLoading(false); });
+  };
+
   var doEnrich = function() {
     if (!preview || preview.length === 0) return;
     var withDomain = preview.filter(function(c) { return c.dominio; });
-    if (withDomain.length === 0) { props.setMsg({ type: "err", text: "Nenhuma empresa tem domínio para enriquecer" }); return; }
-    setEnriching(true); setEnrichProgress(0);
-    // Enrich in batches of 20 to show progress
-    var batchSize = 20;
-    var batches = [];
-    for (var b = 0; b < withDomain.length; b += batchSize) {
-      batches.push(withDomain.slice(b, b + batchSize));
-    }
-    var allEnriched = [];
-    var totalEnriched = 0;
-    var runBatch = function(idx) {
-      if (idx >= batches.length) {
-        // Merge all enriched back into preview
+    if (withDomain.length === 0) { props.setMsg({ type: "err", text: "Nenhuma empresa tem dominio para enriquecer" }); return; }
+    setEnriching(true);
+    fetch("/api/apollo", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ companies: withDomain }) })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.error) { props.setMsg({ type: "err", text: "Apollo: " + data.error }); return; }
+        var enriched = data.data || [];
         var enrichMap = {};
-        for (var i = 0; i < allEnriched.length; i++) { enrichMap[allEnriched[i].dominio] = allEnriched[i]; }
+        for (var i = 0; i < enriched.length; i++) { enrichMap[enriched[i].dominio] = enriched[i]; }
         var updated = preview.map(function(c) {
           if (c.dominio && enrichMap[c.dominio]) return enrichMap[c.dominio];
           return c;
         });
         setPreview(updated);
-        setEnriching(false);
-        props.setMsg({ type: "ok", text: totalEnriched + " de " + withDomain.length + " empresas enriquecidas" });
-        return;
-      }
-      fetch("/api/enrich", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ companies: batches[idx] }) })
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-          if (data.data) { allEnriched = allEnriched.concat(data.data); totalEnriched += (data.enriched || 0); }
-          var done = Math.min((idx + 1) * batchSize, withDomain.length);
-          setEnrichProgress(Math.round(done / withDomain.length * 100));
-          runBatch(idx + 1);
-        })
-        .catch(function() { runBatch(idx + 1); });
-    };
-    runBatch(0);
+        props.setMsg({ type: "ok", text: (data.enriched || 0) + " empresas enriquecidas com Apollo" });
+      })
+      .catch(function(e) { props.setMsg({ type: "err", text: e.message }); })
+      .finally(function() { setEnriching(false); });
   };
 
   var doImport = function() {
     if (!preview || preview.length === 0) return;
     setLoading(true);
-    fetch("/api/leads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "importEmpresas", empresas: preview, fonte: { nome: importNome || importUrl, tipo: importTipo, url: importUrl, estrategia: importEst } }) })
+    var fonteUrl = importMode === "url" ? importUrl : "";
+    fetch("/api/leads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "importEmpresas", empresas: preview, fonte: { nome: importNome || fonteUrl || pdfFileName, tipo: importTipo, url: fonteUrl, estrategia: importEst } }) })
       .then(function(r) { return r.json(); })
       .then(function(data) {
         if (data.ok) {
@@ -142,35 +150,83 @@ function ImportPage(props) {
       .finally(function() { setLoading(false); });
   };
 
+  var handleFileChange = function(e) {
+    var f = e.target.files && e.target.files[0];
+    if (f) { setPdfFile(f); setPdfFileName(f.name); setPreview(null); setResult(null); }
+  };
+
+  var canExtract = importMode === "url" ? !!importUrl : !!pdfFile;
+  var extractLabel = loading ? (importMode === "pdf" ? "Analisando PDF..." : "Buscando...") : "1. Extrair Empresas";
+
   return (
     <div>
       <h1 style={h1St}>Importar Empresas</h1>
-      <Card title="Scrape + Enrich">
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
-          <Field label="URL da fonte *" value={importUrl} onChange={setImportUrl} placeholder="https://www.mmerge.io/pt/.../sponsors_partners" />
-          <Field label="Nome da fonte" value={importNome} onChange={setImportNome} placeholder="Ex: MERGE SP 2026 Sponsors" />
+      <Card title="Fonte de Dados">
+
+        {/* Toggle URL / PDF */}
+        <div style={{ display: "flex", gap: 0, marginBottom: 20, background: "#f0f0f0", borderRadius: 10, padding: 4, width: "fit-content" }}>
+          <button
+            onClick={function() { setImportMode("url"); setPreview(null); setResult(null); }}
+            style={{ padding: "8px 20px", borderRadius: 8, border: "none", fontWeight: 600, fontSize: 13, cursor: "pointer", background: importMode === "url" ? "#003366" : "transparent", color: importMode === "url" ? "white" : "#666", transition: "all 0.2s" }}>
+            🔗 URL / Scrape
+          </button>
+          <button
+            onClick={function() { setImportMode("pdf"); setPreview(null); setResult(null); }}
+            style={{ padding: "8px 20px", borderRadius: 8, border: "none", fontWeight: 600, fontSize: 13, cursor: "pointer", background: importMode === "pdf" ? "#003366" : "transparent", color: importMode === "pdf" ? "white" : "#666", transition: "all 0.2s" }}>
+            📄 PDF
+          </button>
         </div>
+
+        {/* URL mode */}
+        {importMode === "url" ? (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
+            <Field label="URL da fonte *" value={importUrl} onChange={setImportUrl} placeholder="https://www.mmerge.io/pt/.../sponsors_partners" />
+            <Field label="Nome da fonte" value={importNome} onChange={setImportNome} placeholder="Ex: MERGE SP 2026 Sponsors" />
+          </div>
+        ) : null}
+
+        {/* PDF mode */}
+        {importMode === "pdf" ? (
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: "#888", marginBottom: 6 }}>Arquivo PDF *</div>
+            <label style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 18px", border: "2px dashed " + (pdfFile ? "#00B8A9" : "#ccc"), borderRadius: 10, cursor: "pointer", background: pdfFile ? "#f0fffe" : "#fafafa", transition: "all 0.2s" }}>
+              <span style={{ fontSize: 24 }}>📄</span>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: pdfFile ? "#003366" : "#999" }}>
+                  {pdfFileName || "Clique para selecionar um PDF"}
+                </div>
+                {!pdfFile ? <div style={{ fontSize: 11, color: "#bbb", marginTop: 2 }}>Suporta PDFs nativos e escaneados</div> : null}
+              </div>
+              <input type="file" accept=".pdf" onChange={handleFileChange} style={{ display: "none" }} />
+            </label>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 12 }}>
+              <Field label="Nome da fonte" value={importNome} onChange={setImportNome} placeholder="Ex: Lista Clientes Q1 2026" />
+            </div>
+          </div>
+        ) : null}
+
+        {/* Controles compartilhados */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 2fr", gap: 12, marginBottom: 16 }}>
           <Select label="Tipo" value={importTipo} onChange={setImportTipo} options={TIPOS_FONTE} />
           <Select label="Estrategia" value={importEst} onChange={setImportEst} options={ESTRATEGIAS} />
-          <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
-            <button onClick={doPreview} disabled={loading || !importUrl} style={btnStyle(importUrl ? "#003366" : "#ddd")}>{loading ? "Buscando..." : "1. Preview"}</button>
-            <button onClick={doEnrich} disabled={enriching || !preview || preview.length === 0} style={btnStyle(preview && preview.length > 0 ? "#0097A7" : "#ddd")}>{enriching ? ("Enriquecendo... " + enrichProgress + "%") : "2. Enrich (site)"}</button>
+          <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+            <button
+              onClick={importMode === "url" ? doPreview : doPdfExtract}
+              disabled={loading || !canExtract}
+              style={btnStyle(canExtract ? "#003366" : "#ddd")}>
+              {extractLabel}
+            </button>
+            <button onClick={doEnrich} disabled={enriching || !preview || preview.length === 0} style={btnStyle(preview && preview.length > 0 ? "#ff9800" : "#ddd")}>{enriching ? "Enriquecendo..." : "2. Apollo Enrich"}</button>
             <button onClick={doImport} disabled={loading || !preview || preview.length === 0} style={btnStyle(preview && preview.length > 0 ? "#4caf50" : "#ddd")}>{loading ? "Salvando..." : "3. Salvar no Notion"}</button>
           </div>
-          {enriching ? (
-            <div style={{ marginTop: 10 }}>
-              <div style={{ background: "#e0e0e0", borderRadius: 4, height: 6, overflow: "hidden" }}>
-                <div style={{ width: enrichProgress + "%", height: "100%", background: "#00B8A9", borderRadius: 4, transition: "width 0.3s" }}></div>
-              </div>
-              <div style={{ fontSize: 11, color: "#888", marginTop: 4 }}>{enrichProgress + "% — lendo sites das empresas..."}</div>
-            </div>
-          ) : null}
         </div>
 
+        {/* Preview table */}
         {preview && preview.length > 0 ? (
           <div style={{ border: "2px solid #00B8A9", borderRadius: 10, overflow: "hidden" }}>
-            <div style={{ background: "#00B8A9", color: "white", padding: "8px 16px", fontSize: 13, fontWeight: 600 }}>{preview.length + " empresas encontradas"}</div>
+            <div style={{ background: "#00B8A9", color: "white", padding: "8px 16px", fontSize: 13, fontWeight: 600 }}>
+              {preview.length + " empresas encontradas" + (importMode === "pdf" ? " via PDF" : "")}
+            </div>
             <div style={{ maxHeight: 500, overflow: "auto" }}>
               <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
                 <thead><tr style={{ background: "#f5f5f5", position: "sticky", top: 0 }}>
@@ -196,8 +252,7 @@ function ImportPage(props) {
           </div>
         ) : null}
 
-        {preview && preview.length === 0 ? <div style={{ background: "#fff3e0", borderRadius: 8, padding: 12, fontSize: 13, color: "#E65100" }}>Nenhuma empresa encontrada nesta URL.</div> : null}
-
+        {preview && preview.length === 0 ? <div style={{ background: "#fff3e0", borderRadius: 8, padding: 12, fontSize: 13, color: "#E65100" }}>Nenhuma empresa encontrada.</div> : null}
         {result && !result.error && result.saved ? <div style={{ background: "#e8f5e9", borderRadius: 8, padding: 12, fontSize: 13, color: "#2E7D32", marginTop: 12 }}>{result.saved + " empresas salvas no Notion"}</div> : null}
         {result && result.error ? <div style={{ background: "#ffebee", borderRadius: 8, padding: 12, fontSize: 13, color: "#c62828", marginTop: 12 }}>{"Erro: " + result.error}</div> : null}
       </Card>
