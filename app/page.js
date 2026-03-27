@@ -89,25 +89,41 @@ function ImportPage(props) {
   var doEnrich = function() {
     if (!preview || preview.length === 0) return;
     var withDomain = preview.filter(function(c) { return c.dominio; });
-    if (withDomain.length === 0) { props.setMsg({ type: "err", text: "Nenhuma empresa tem dominio para enriquecer" }); return; }
+    if (withDomain.length === 0) { props.setMsg({ type: "err", text: "Nenhuma empresa tem domínio para enriquecer" }); return; }
     setEnriching(true); setEnrichProgress(0);
-    fetch("/api/apollo", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ companies: withDomain }) })
-      .then(function(r) { return r.json(); })
-      .then(function(data) {
-        if (data.error) { props.setMsg({ type: "err", text: "Apollo: " + data.error }); return; }
-        // Merge enriched data back into preview
-        var enriched = data.data || [];
+    // Enrich in batches of 20 to show progress
+    var batchSize = 20;
+    var batches = [];
+    for (var b = 0; b < withDomain.length; b += batchSize) {
+      batches.push(withDomain.slice(b, b + batchSize));
+    }
+    var allEnriched = [];
+    var totalEnriched = 0;
+    var runBatch = function(idx) {
+      if (idx >= batches.length) {
+        // Merge all enriched back into preview
         var enrichMap = {};
-        for (var i = 0; i < enriched.length; i++) { enrichMap[enriched[i].dominio] = enriched[i]; }
+        for (var i = 0; i < allEnriched.length; i++) { enrichMap[allEnriched[i].dominio] = allEnriched[i]; }
         var updated = preview.map(function(c) {
           if (c.dominio && enrichMap[c.dominio]) return enrichMap[c.dominio];
           return c;
         });
         setPreview(updated);
-        props.setMsg({ type: "ok", text: (data.enriched || 0) + " empresas enriquecidas com Apollo" });
-      })
-      .catch(function(e) { props.setMsg({ type: "err", text: e.message }); })
-      .finally(function() { setEnriching(false); });
+        setEnriching(false);
+        props.setMsg({ type: "ok", text: totalEnriched + " de " + withDomain.length + " empresas enriquecidas" });
+        return;
+      }
+      fetch("/api/enrich", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ companies: batches[idx] }) })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          if (data.data) { allEnriched = allEnriched.concat(data.data); totalEnriched += (data.enriched || 0); }
+          var done = Math.min((idx + 1) * batchSize, withDomain.length);
+          setEnrichProgress(Math.round(done / withDomain.length * 100));
+          runBatch(idx + 1);
+        })
+        .catch(function() { runBatch(idx + 1); });
+    };
+    runBatch(0);
   };
 
   var doImport = function() {
@@ -137,11 +153,19 @@ function ImportPage(props) {
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 2fr", gap: 12, marginBottom: 16 }}>
           <Select label="Tipo" value={importTipo} onChange={setImportTipo} options={TIPOS_FONTE} />
           <Select label="Estrategia" value={importEst} onChange={setImportEst} options={ESTRATEGIAS} />
-          <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
             <button onClick={doPreview} disabled={loading || !importUrl} style={btnStyle(importUrl ? "#003366" : "#ddd")}>{loading ? "Buscando..." : "1. Preview"}</button>
-            <button onClick={doEnrich} disabled={enriching || !preview || preview.length === 0} style={btnStyle(preview && preview.length > 0 ? "#ff9800" : "#ddd")}>{enriching ? "Enriquecendo..." : "2. Apollo Enrich"}</button>
+            <button onClick={doEnrich} disabled={enriching || !preview || preview.length === 0} style={btnStyle(preview && preview.length > 0 ? "#0097A7" : "#ddd")}>{enriching ? ("Enriquecendo... " + enrichProgress + "%") : "2. Enrich (site)"}</button>
             <button onClick={doImport} disabled={loading || !preview || preview.length === 0} style={btnStyle(preview && preview.length > 0 ? "#4caf50" : "#ddd")}>{loading ? "Salvando..." : "3. Salvar no Notion"}</button>
           </div>
+          {enriching ? (
+            <div style={{ marginTop: 10 }}>
+              <div style={{ background: "#e0e0e0", borderRadius: 4, height: 6, overflow: "hidden" }}>
+                <div style={{ width: enrichProgress + "%", height: "100%", background: "#00B8A9", borderRadius: 4, transition: "width 0.3s" }}></div>
+              </div>
+              <div style={{ fontSize: 11, color: "#888", marginTop: 4 }}>{enrichProgress + "% — lendo sites das empresas..."}</div>
+            </div>
+          ) : null}
         </div>
 
         {preview && preview.length > 0 ? (
