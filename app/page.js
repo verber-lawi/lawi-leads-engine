@@ -66,15 +66,14 @@ function DashboardPage(props) {
 
 // ============ IMPORT EMPRESAS ============
 function ImportPage(props) {
-  // Modo: "url" ou "pdf"
   var sMode = useState("url"); var importMode = sMode[0]; var setImportMode = sMode[1];
 
-  // URL mode
+  // URL
   var s1 = useState(""); var importUrl = s1[0]; var setImportUrl = s1[1];
 
-  // PDF mode
-  var sPdf = useState(null); var pdfFile = sPdf[0]; var setPdfFile = sPdf[1];
-  var sPdfName = useState(""); var pdfFileName = sPdfName[0]; var setPdfFileName = sPdfName[1];
+  // CSV
+  var sCsv = useState(null); var csvFile = sCsv[0]; var setCsvFile = sCsv[1];
+  var sCsvName = useState(""); var csvFileName = sCsvName[0]; var setCsvFileName = sCsvName[1];
 
   // Shared
   var s2 = useState(""); var importNome = s2[0]; var setImportNome = s2[1];
@@ -84,6 +83,9 @@ function ImportPage(props) {
   var s6 = useState(null); var preview = s6[0]; var setPreview = s6[1];
   var s7 = useState(false); var enriching = s7[0]; var setEnriching = s7[1];
   var s8 = useState(null); var result = s8[0]; var setResult = s8[1];
+  var sCopied = useState(false); var copied = sCopied[0]; var setCopied = sCopied[1];
+
+  var PROMPT_PADRAO = "Analise o conteúdo a seguir e extraia todas as empresas ou organizações mencionadas.\n\nRetorne SOMENTE um CSV com o seguinte cabeçalho exato (sem texto adicional):\nnome,dominio,setor,pais,descricao,notas\n\nRegras:\n- nome: nome da empresa (obrigatório)\n- dominio: site sem https:// (ex: empresa.com) ou vazio\n- setor: setor/indústria ou vazio\n- pais: país ou vazio\n- descricao: descrição breve ou vazio\n- notas: informações extras (ex: tier de patrocínio) ou vazio\n- Separe campos por vírgula; use aspas se o campo contiver vírgula\n- Uma empresa por linha\n\n[COLE O CONTEÚDO AQUI]";
 
   var doPreview = function() {
     if (!importUrl) return;
@@ -95,15 +97,15 @@ function ImportPage(props) {
       .finally(function() { setLoading(false); });
   };
 
-  var doPdfExtract = function() {
-    if (!pdfFile) return;
+  var doCsvImport = function() {
+    if (!csvFile) return;
     setLoading(true); setPreview(null); setResult(null);
     var fd = new FormData();
-    fd.append("file", pdfFile);
+    fd.append("file", csvFile);
     fd.append("tipo", importTipo);
     fd.append("estrategia", importEst);
-    fd.append("nome", importNome || pdfFileName);
-    fetch("/api/pdf", { method: "POST", body: fd })
+    fd.append("nome", importNome || csvFileName);
+    fetch("/api/csv", { method: "POST", body: fd })
       .then(function(r) { return r.json(); })
       .then(function(data) { if (data.error) { setResult({ error: data.error }); } else { setPreview(data.preview || []); } })
       .catch(function(e) { setResult({ error: e.message }); })
@@ -122,10 +124,7 @@ function ImportPage(props) {
         var enriched = data.data || [];
         var enrichMap = {};
         for (var i = 0; i < enriched.length; i++) { enrichMap[enriched[i].dominio] = enriched[i]; }
-        var updated = preview.map(function(c) {
-          if (c.dominio && enrichMap[c.dominio]) return enrichMap[c.dominio];
-          return c;
-        });
+        var updated = preview.map(function(c) { return (c.dominio && enrichMap[c.dominio]) ? enrichMap[c.dominio] : c; });
         setPreview(updated);
         props.setMsg({ type: "ok", text: (data.enriched || 0) + " empresas enriquecidas com Apollo" });
       })
@@ -133,18 +132,14 @@ function ImportPage(props) {
       .finally(function() { setEnriching(false); });
   };
 
-  var doImport = function() {
+  var doSave = function() {
     if (!preview || preview.length === 0) return;
     setLoading(true);
     var fonteUrl = importMode === "url" ? importUrl : "";
-    fetch("/api/leads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "importEmpresas", empresas: preview, fonte: { nome: importNome || fonteUrl || pdfFileName, tipo: importTipo, url: fonteUrl, estrategia: importEst } }) })
+    fetch("/api/leads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "importEmpresas", empresas: preview, fonte: { nome: importNome || fonteUrl || csvFileName, tipo: importTipo, url: fonteUrl, estrategia: importEst } }) })
       .then(function(r) { return r.json(); })
       .then(function(data) {
-        if (data.ok) {
-          setResult(data);
-          props.setMsg({ type: "ok", text: data.saved + " empresas salvas no Notion" });
-          props.loadStats();
-        }
+        if (data.ok) { setResult(data); props.setMsg({ type: "ok", text: data.saved + " empresas salvas no Notion" }); props.loadStats(); }
       })
       .catch(function(e) { setResult({ error: e.message }); })
       .finally(function() { setLoading(false); });
@@ -152,29 +147,30 @@ function ImportPage(props) {
 
   var handleFileChange = function(e) {
     var f = e.target.files && e.target.files[0];
-    if (f) { setPdfFile(f); setPdfFileName(f.name); setPreview(null); setResult(null); }
+    if (f) { setCsvFile(f); setCsvFileName(f.name); setPreview(null); setResult(null); }
   };
 
-  var canExtract = importMode === "url" ? !!importUrl : !!pdfFile;
-  var extractLabel = loading ? (importMode === "pdf" ? "Analisando PDF..." : "Buscando...") : "1. Extrair Empresas";
+  var handleCopyPrompt = function() {
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(PROMPT_PADRAO).then(function() {
+        setCopied(true);
+        setTimeout(function() { setCopied(false); }, 2500);
+      });
+    }
+  };
+
+  var canExtract = importMode === "url" ? !!importUrl : !!csvFile;
+  var extractLabel = loading ? (importMode === "csv" ? "Lendo CSV..." : "Buscando...") : "1. Carregar";
 
   return (
     <div>
       <h1 style={h1St}>Importar Empresas</h1>
-      <Card title="Fonte de Dados">
 
-        {/* Toggle URL / PDF */}
+      <Card title="Fonte de Dados">
+        {/* Toggle */}
         <div style={{ display: "flex", gap: 0, marginBottom: 20, background: "#f0f0f0", borderRadius: 10, padding: 4, width: "fit-content" }}>
-          <button
-            onClick={function() { setImportMode("url"); setPreview(null); setResult(null); }}
-            style={{ padding: "8px 20px", borderRadius: 8, border: "none", fontWeight: 600, fontSize: 13, cursor: "pointer", background: importMode === "url" ? "#003366" : "transparent", color: importMode === "url" ? "white" : "#666", transition: "all 0.2s" }}>
-            🔗 URL / Scrape
-          </button>
-          <button
-            onClick={function() { setImportMode("pdf"); setPreview(null); setResult(null); }}
-            style={{ padding: "8px 20px", borderRadius: 8, border: "none", fontWeight: 600, fontSize: 13, cursor: "pointer", background: importMode === "pdf" ? "#003366" : "transparent", color: importMode === "pdf" ? "white" : "#666", transition: "all 0.2s" }}>
-            📄 PDF
-          </button>
+          <button onClick={function() { setImportMode("url"); setPreview(null); setResult(null); }} style={{ padding: "8px 20px", borderRadius: 8, border: "none", fontWeight: 600, fontSize: 13, cursor: "pointer", background: importMode === "url" ? "#003366" : "transparent", color: importMode === "url" ? "white" : "#666" }}>🔗 URL / Scrape</button>
+          <button onClick={function() { setImportMode("csv"); setPreview(null); setResult(null); }} style={{ padding: "8px 20px", borderRadius: 8, border: "none", fontWeight: 600, fontSize: 13, cursor: "pointer", background: importMode === "csv" ? "#003366" : "transparent", color: importMode === "csv" ? "white" : "#666" }}>📋 CSV</button>
         </div>
 
         {/* URL mode */}
@@ -185,57 +181,55 @@ function ImportPage(props) {
           </div>
         ) : null}
 
-        {/* PDF mode */}
-        {importMode === "pdf" ? (
+        {/* CSV mode */}
+        {importMode === "csv" ? (
           <div style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: "#888", marginBottom: 6 }}>Arquivo PDF *</div>
-            <label style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 18px", border: "2px dashed " + (pdfFile ? "#00B8A9" : "#ccc"), borderRadius: 10, cursor: "pointer", background: pdfFile ? "#f0fffe" : "#fafafa", transition: "all 0.2s" }}>
-              <span style={{ fontSize: 24 }}>📄</span>
-              <div>
-                <div style={{ fontSize: 13, fontWeight: 600, color: pdfFile ? "#003366" : "#999" }}>
-                  {pdfFileName || "Clique para selecionar um PDF"}
-                </div>
-                {!pdfFile ? <div style={{ fontSize: 11, color: "#bbb", marginTop: 2 }}>Suporta PDFs nativos e escaneados</div> : null}
+            {/* Instrução com prompt */}
+            <div style={{ background: "#f0f4ff", border: "1px solid #c5d0e8", borderRadius: 10, padding: "14px 16px", marginBottom: 16 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#003366", marginBottom: 6 }}>💡 Como gerar o CSV</div>
+              <div style={{ fontSize: 12, color: "#444", lineHeight: 1.6, marginBottom: 10 }}>
+                Abra o ChatGPT ou Claude, cole o conteúdo do seu documento (PDF, site, lista) e use o prompt abaixo. A IA vai gerar um CSV pronto para importar.
               </div>
-              <input type="file" accept=".pdf" onChange={handleFileChange} style={{ display: "none" }} />
+              <div style={{ background: "#fff", border: "1px solid #dde3f0", borderRadius: 8, padding: "10px 12px", fontSize: 11, color: "#555", fontFamily: "monospace", lineHeight: 1.7, whiteSpace: "pre-wrap", maxHeight: 120, overflow: "auto" }}>{PROMPT_PADRAO}</div>
+              <button onClick={handleCopyPrompt} style={{ marginTop: 8, padding: "6px 14px", background: copied ? "#4caf50" : "#003366", color: "white", border: "none", borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>{copied ? "✓ Copiado!" : "Copiar Prompt"}</button>
+            </div>
+
+            {/* Upload CSV */}
+            <div style={{ fontSize: 11, fontWeight: 600, color: "#888", marginBottom: 6 }}>Arquivo CSV *</div>
+            <label style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 18px", border: "2px dashed " + (csvFile ? "#00B8A9" : "#ccc"), borderRadius: 10, cursor: "pointer", background: csvFile ? "#f0fffe" : "#fafafa" }}>
+              <span style={{ fontSize: 22 }}>📋</span>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: csvFile ? "#003366" : "#999" }}>{csvFileName || "Clique para selecionar o CSV"}</div>
+                {!csvFile ? <div style={{ fontSize: 11, color: "#bbb", marginTop: 2 }}>Formato: nome, dominio, setor, pais, descricao, notas</div> : null}
+              </div>
+              <input type="file" accept=".csv" onChange={handleFileChange} style={{ display: "none" }} />
             </label>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 12 }}>
-              <Field label="Nome da fonte" value={importNome} onChange={setImportNome} placeholder="Ex: Lista Clientes Q1 2026" />
+
+            <div style={{ marginTop: 12 }}>
+              <Field label="Nome da fonte" value={importNome} onChange={setImportNome} placeholder="Ex: Lista Sponsors MERGE 2026" />
             </div>
           </div>
         ) : null}
 
-        {/* Controles compartilhados */}
+        {/* Controles */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 2fr", gap: 12, marginBottom: 16 }}>
           <Select label="Tipo" value={importTipo} onChange={setImportTipo} options={TIPOS_FONTE} />
           <Select label="Estrategia" value={importEst} onChange={setImportEst} options={ESTRATEGIAS} />
           <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
-            <button
-              onClick={importMode === "url" ? doPreview : doPdfExtract}
-              disabled={loading || !canExtract}
-              style={btnStyle(canExtract ? "#003366" : "#ddd")}>
-              {extractLabel}
-            </button>
+            <button onClick={importMode === "url" ? doPreview : doCsvImport} disabled={loading || !canExtract} style={btnStyle(canExtract ? "#003366" : "#ddd")}>{extractLabel}</button>
             <button onClick={doEnrich} disabled={enriching || !preview || preview.length === 0} style={btnStyle(preview && preview.length > 0 ? "#ff9800" : "#ddd")}>{enriching ? "Enriquecendo..." : "2. Apollo Enrich"}</button>
-            <button onClick={doImport} disabled={loading || !preview || preview.length === 0} style={btnStyle(preview && preview.length > 0 ? "#4caf50" : "#ddd")}>{loading ? "Salvando..." : "3. Salvar no Notion"}</button>
+            <button onClick={doSave} disabled={loading || !preview || preview.length === 0} style={btnStyle(preview && preview.length > 0 ? "#4caf50" : "#ddd")}>{loading ? "Salvando..." : "3. Salvar no Notion"}</button>
           </div>
         </div>
 
-        {/* Preview table */}
+        {/* Preview */}
         {preview && preview.length > 0 ? (
           <div style={{ border: "2px solid #00B8A9", borderRadius: 10, overflow: "hidden" }}>
-            <div style={{ background: "#00B8A9", color: "white", padding: "8px 16px", fontSize: 13, fontWeight: 600 }}>
-              {preview.length + " empresas encontradas" + (importMode === "pdf" ? " via PDF" : "")}
-            </div>
+            <div style={{ background: "#00B8A9", color: "white", padding: "8px 16px", fontSize: 13, fontWeight: 600 }}>{preview.length + " empresas encontradas"}</div>
             <div style={{ maxHeight: 500, overflow: "auto" }}>
               <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
                 <thead><tr style={{ background: "#f5f5f5", position: "sticky", top: 0 }}>
-                  <th style={thSt}>Empresa</th>
-                  <th style={thSt}>Dominio</th>
-                  <th style={thSt}>Setor</th>
-                  <th style={thSt}>Pais</th>
-                  <th style={thSt}>Tamanho</th>
-                  <th style={thSt}>Funding</th>
+                  <th style={thSt}>Empresa</th><th style={thSt}>Dominio</th><th style={thSt}>Setor</th><th style={thSt}>Pais</th><th style={thSt}>Descrição</th><th style={thSt}>Notas</th>
                 </tr></thead>
                 <tbody>{preview.map(function(c, i) {
                   return <tr key={i} style={{ borderBottom: "1px solid #f0f0f0" }}>
@@ -243,8 +237,8 @@ function ImportPage(props) {
                     <td style={tdSt}>{c.dominio ? <a href={"https://" + c.dominio} target="_blank" rel="noreferrer" style={{ color: "#1565C0", textDecoration: "none" }}>{c.dominio}</a> : <span style={{ color: "#ccc" }}>--</span>}</td>
                     <td style={tdSt}>{c.setor ? <span style={{ background: "#e8f5e9", color: "#2E7D32", padding: "2px 6px", borderRadius: 4, fontSize: 11 }}>{c.setor}</span> : <span style={{ color: "#ccc" }}>--</span>}</td>
                     <td style={tdSt}>{c.pais || <span style={{ color: "#ccc" }}>--</span>}</td>
-                    <td style={tdSt}>{c.tamanoLabel || <span style={{ color: "#ccc" }}>--</span>}</td>
-                    <td style={tdSt}>{c.funding || <span style={{ color: "#ccc" }}>--</span>}</td>
+                    <td style={tdSt}>{c.descricao ? <span style={{ color: "#555" }}>{c.descricao.substring(0, 60)}</span> : <span style={{ color: "#ccc" }}>--</span>}</td>
+                    <td style={tdSt}>{c.notas || <span style={{ color: "#ccc" }}>--</span>}</td>
                   </tr>;
                 })}</tbody>
               </table>
