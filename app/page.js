@@ -65,28 +65,51 @@ function DashboardPage(props) {
 }
 
 // ============ IMPORT EMPRESAS ============
+var EXAMPLE_TEXT = `// Exemplo — cole qualquer formato, um ou vários de uma vez:
+
+Nubank
+nubank.com.br
+Fintech · Brasil · Series G
+
+---
+
+João Silva
+CEO @ Itaú BBA
+joao.silva@itau.com.br
+linkedin.com/in/joaosilva
+
+---
+
+Empresa: Creditas
+Site: creditas.com
+Setor: Fintech
+País: Brasil
+Contato: Sergio Furio, Founder & CEO
+
+---
+
+BTG Pactual · btgpactual.com · Investment Bank · Brazil`;
+
 function ImportPage(props) {
-  var sMode = useState("url"); var importMode = sMode[0]; var setImportMode = sMode[1];
-
-  // URL
-  var s1 = useState(""); var importUrl = s1[0]; var setImportUrl = s1[1];
-
-  // CSV
-  var sCsv = useState(null); var csvFile = sCsv[0]; var setCsvFile = sCsv[1];
-  var sCsvName = useState(""); var csvFileName = sCsvName[0]; var setCsvFileName = sCsvName[1];
-
   // Shared
-  var s2 = useState(""); var importNome = s2[0]; var setImportNome = s2[1];
+  var st = useState("url"); var activeTab = st[0]; var setActiveTab = st[1];
   var s3 = useState("Evento"); var importTipo = s3[0]; var setImportTipo = s3[1];
   var s4 = useState("C - Eventos"); var importEst = s4[0]; var setImportEst = s4[1];
+  var s8 = useState(null); var result = s8[0]; var setResult = s8[1];
+
+  // URL tab
+  var s1 = useState(""); var importUrl = s1[0]; var setImportUrl = s1[1];
+  var s2 = useState(""); var importNome = s2[0]; var setImportNome = s2[1];
   var s5 = useState(false); var loading = s5[0]; var setLoading = s5[1];
   var s6 = useState(null); var preview = s6[0]; var setPreview = s6[1];
-  var s7 = useState(false); var enriching = s7[0]; var setEnriching = s7[1];
-  var s8 = useState(null); var result = s8[0]; var setResult = s8[1];
-  var sCopied = useState(false); var copied = sCopied[0]; var setCopied = sCopied[1];
 
-  var PROMPT_PADRAO = "Analise o conteúdo a seguir e extraia todas as empresas ou organizações mencionadas.\n\nRetorne SOMENTE um CSV com o seguinte cabeçalho exato (sem texto adicional):\nnome,dominio,setor,pais,descricao,notas\n\nRegras:\n- nome: nome da empresa (obrigatório)\n- dominio: site sem https:// (ex: empresa.com) ou vazio\n- setor: setor/indústria ou vazio\n- pais: país ou vazio\n- descricao: descrição breve ou vazio\n- notas: informações extras (ex: tier de patrocínio) ou vazio\n- Separe campos por vírgula; use aspas se o campo contiver vírgula\n- Uma empresa por linha\n\n[COLE O CONTEÚDO AQUI]";
+  // Text tab
+  var st1 = useState(""); var pasteText = st1[0]; var setPasteText = st1[1];
+  var st2 = useState(""); var pasteNome = st2[0]; var setPasteNome = st2[1];
+  var st3 = useState(false); var parsing = st3[0]; var setParsing = st3[1];
+  var st4 = useState(null); var parsedData = st4[0]; var setParsedData = st4[1];
 
+  // ---- URL tab actions ----
   var doPreview = function() {
     if (!importUrl) return;
     setLoading(true); setPreview(null); setResult(null);
@@ -97,46 +120,10 @@ function ImportPage(props) {
       .finally(function() { setLoading(false); });
   };
 
-  var doCsvImport = function() {
-    if (!csvFile) return;
-    setLoading(true); setPreview(null); setResult(null);
-    var fd = new FormData();
-    fd.append("file", csvFile);
-    fd.append("tipo", importTipo);
-    fd.append("estrategia", importEst);
-    fd.append("nome", importNome || csvFileName);
-    fetch("/api/csv", { method: "POST", body: fd })
-      .then(function(r) { return r.json(); })
-      .then(function(data) { if (data.error) { setResult({ error: data.error }); } else { setPreview(data.preview || []); } })
-      .catch(function(e) { setResult({ error: e.message }); })
-      .finally(function() { setLoading(false); });
-  };
-
-  var doEnrich = function() {
-    if (!preview || preview.length === 0) return;
-    var withDomain = preview.filter(function(c) { return c.dominio; });
-    if (withDomain.length === 0) { props.setMsg({ type: "err", text: "Nenhuma empresa tem dominio para enriquecer" }); return; }
-    setEnriching(true);
-    fetch("/api/apollo", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ companies: withDomain }) })
-      .then(function(r) { return r.json(); })
-      .then(function(data) {
-        if (data.error) { props.setMsg({ type: "err", text: "Apollo: " + data.error }); return; }
-        var enriched = data.data || [];
-        var enrichMap = {};
-        for (var i = 0; i < enriched.length; i++) { enrichMap[enriched[i].dominio] = enriched[i]; }
-        var updated = preview.map(function(c) { return (c.dominio && enrichMap[c.dominio]) ? enrichMap[c.dominio] : c; });
-        setPreview(updated);
-        props.setMsg({ type: "ok", text: (data.enriched || 0) + " empresas enriquecidas com Apollo" });
-      })
-      .catch(function(e) { props.setMsg({ type: "err", text: e.message }); })
-      .finally(function() { setEnriching(false); });
-  };
-
-  var doSave = function() {
+  var doImportUrl = function() {
     if (!preview || preview.length === 0) return;
     setLoading(true);
-    var fonteUrl = importMode === "url" ? importUrl : "";
-    fetch("/api/leads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "importEmpresas", empresas: preview, fonte: { nome: importNome || fonteUrl || csvFileName, tipo: importTipo, url: fonteUrl, estrategia: importEst } }) })
+    fetch("/api/leads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "importEmpresas", empresas: preview, fonte: { nome: importNome || importUrl, tipo: importTipo, url: importUrl, estrategia: importEst } }) })
       .then(function(r) { return r.json(); })
       .then(function(data) {
         if (data.ok) { setResult(data); props.setMsg({ type: "ok", text: data.saved + " empresas salvas no Notion" }); props.loadStats(); }
@@ -145,111 +132,185 @@ function ImportPage(props) {
       .finally(function() { setLoading(false); });
   };
 
-  var handleFileChange = function(e) {
-    var f = e.target.files && e.target.files[0];
-    if (f) { setCsvFile(f); setCsvFileName(f.name); setPreview(null); setResult(null); }
+  // ---- Text tab actions ----
+  var doParse = function() {
+    if (!pasteText.trim()) return;
+    setParsing(true); setParsedData(null); setResult(null);
+    fetch("/api/parse-text", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: pasteText, estrategia: importEst, fonte: pasteNome }) })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.error) { setResult({ error: data.error }); }
+        else { setParsedData(data); }
+      })
+      .catch(function(e) { setResult({ error: e.message }); })
+      .finally(function() { setParsing(false); });
   };
 
-  var handleCopyPrompt = function() {
-    if (navigator.clipboard) {
-      navigator.clipboard.writeText(PROMPT_PADRAO).then(function() {
-        setCopied(true);
-        setTimeout(function() { setCopied(false); }, 2500);
-      });
+  var doImportParsed = function() {
+    if (!parsedData) return;
+    setLoading(true);
+    var promises = [];
+    if (parsedData.empresas && parsedData.empresas.length > 0) {
+      promises.push(
+        fetch("/api/leads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "importEmpresas", empresas: parsedData.empresas, fonte: { nome: pasteNome || "Texto manual", tipo: importTipo, estrategia: importEst } }) })
+          .then(function(r) { return r.json(); })
+      );
     }
+    if (parsedData.leads && parsedData.leads.length > 0) {
+      promises.push(
+        fetch("/api/leads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "importLeads", leads: parsedData.leads }) })
+          .then(function(r) { return r.json(); })
+      );
+    }
+    Promise.all(promises)
+      .then(function(results) {
+        var totalSaved = results.reduce(function(acc, r) { return acc + (r.saved || 0); }, 0);
+        props.setMsg({ type: "ok", text: totalSaved + " registros salvos no Notion" });
+        props.loadStats();
+        setPasteText(""); setParsedData(null);
+      })
+      .catch(function(e) { setResult({ error: e.message }); })
+      .finally(function() { setLoading(false); });
   };
 
-  var canExtract = importMode === "url" ? !!importUrl : !!csvFile;
-  var extractLabel = loading ? (importMode === "csv" ? "Lendo CSV..." : "Buscando...") : "1. Carregar";
+  var tabStyle = function(active) {
+    return { padding: "8px 20px", border: "none", borderBottom: active ? "2px solid #003366" : "2px solid transparent", background: "none", fontWeight: active ? 700 : 400, color: active ? "#003366" : "#888", fontSize: 14, cursor: "pointer" };
+  };
 
   return (
     <div>
       <h1 style={h1St}>Importar Empresas</h1>
 
-      <Card title="Fonte de Dados">
-        {/* Toggle */}
-        <div style={{ display: "flex", gap: 0, marginBottom: 20, background: "#f0f0f0", borderRadius: 10, padding: 4, width: "fit-content" }}>
-          <button onClick={function() { setImportMode("url"); setPreview(null); setResult(null); }} style={{ padding: "8px 20px", borderRadius: 8, border: "none", fontWeight: 600, fontSize: 13, cursor: "pointer", background: importMode === "url" ? "#003366" : "transparent", color: importMode === "url" ? "white" : "#666" }}>🔗 URL / Scrape</button>
-          <button onClick={function() { setImportMode("csv"); setPreview(null); setResult(null); }} style={{ padding: "8px 20px", borderRadius: 8, border: "none", fontWeight: 600, fontSize: 13, cursor: "pointer", background: importMode === "csv" ? "#003366" : "transparent", color: importMode === "csv" ? "white" : "#666" }}>📋 CSV</button>
-        </div>
+      {/* Tabs */}
+      <div style={{ display: "flex", borderBottom: "1px solid #e0e0e0", marginBottom: 20 }}>
+        <button style={tabStyle(activeTab === "url")} onClick={function() { setActiveTab("url"); setResult(null); }}>🔗 Scrape por URL</button>
+        <button style={tabStyle(activeTab === "text")} onClick={function() { setActiveTab("text"); setResult(null); }}>✍️ Colar Texto</button>
+      </div>
 
-        {/* URL mode */}
-        {importMode === "url" ? (
+      {/* Shared filters */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
+        <Select label="Tipo" value={importTipo} onChange={setImportTipo} options={TIPOS_FONTE} />
+        <Select label="Estrategia" value={importEst} onChange={setImportEst} options={ESTRATEGIAS} />
+      </div>
+
+      {/* ===== TAB: URL ===== */}
+      {activeTab === "url" ? (
+        <Card title="Scrape por URL">
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
             <Field label="URL da fonte *" value={importUrl} onChange={setImportUrl} placeholder="https://www.mmerge.io/pt/.../sponsors_partners" />
             <Field label="Nome da fonte" value={importNome} onChange={setImportNome} placeholder="Ex: MERGE SP 2026 Sponsors" />
           </div>
-        ) : null}
-
-        {/* CSV mode */}
-        {importMode === "csv" ? (
-          <div style={{ marginBottom: 16 }}>
-            {/* Instrução com prompt */}
-            <div style={{ background: "#f0f4ff", border: "1px solid #c5d0e8", borderRadius: 10, padding: "14px 16px", marginBottom: 16 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: "#003366", marginBottom: 6 }}>💡 Como gerar o CSV</div>
-              <div style={{ fontSize: 12, color: "#444", lineHeight: 1.6, marginBottom: 10 }}>
-                Abra o ChatGPT ou Claude, cole o conteúdo do seu documento (PDF, site, lista) e use o prompt abaixo. A IA vai gerar um CSV pronto para importar.
-              </div>
-              <div style={{ background: "#fff", border: "1px solid #dde3f0", borderRadius: 8, padding: "10px 12px", fontSize: 11, color: "#555", fontFamily: "monospace", lineHeight: 1.7, whiteSpace: "pre-wrap", maxHeight: 120, overflow: "auto" }}>{PROMPT_PADRAO}</div>
-              <button onClick={handleCopyPrompt} style={{ marginTop: 8, padding: "6px 14px", background: copied ? "#4caf50" : "#003366", color: "white", border: "none", borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>{copied ? "✓ Copiado!" : "Copiar Prompt"}</button>
-            </div>
-
-            {/* Upload CSV */}
-            <div style={{ fontSize: 11, fontWeight: 600, color: "#888", marginBottom: 6 }}>Arquivo CSV *</div>
-            <label style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 18px", border: "2px dashed " + (csvFile ? "#00B8A9" : "#ccc"), borderRadius: 10, cursor: "pointer", background: csvFile ? "#f0fffe" : "#fafafa" }}>
-              <span style={{ fontSize: 22 }}>📋</span>
-              <div>
-                <div style={{ fontSize: 13, fontWeight: 600, color: csvFile ? "#003366" : "#999" }}>{csvFileName || "Clique para selecionar o CSV"}</div>
-                {!csvFile ? <div style={{ fontSize: 11, color: "#bbb", marginTop: 2 }}>Formato: nome, dominio, setor, pais, descricao, notas</div> : null}
-              </div>
-              <input type="file" accept=".csv" onChange={handleFileChange} style={{ display: "none" }} />
-            </label>
-
-            <div style={{ marginTop: 12 }}>
-              <Field label="Nome da fonte" value={importNome} onChange={setImportNome} placeholder="Ex: Lista Sponsors MERGE 2026" />
-            </div>
+          <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+            <button onClick={doPreview} disabled={loading || !importUrl} style={btnStyle(importUrl ? "#003366" : "#ddd")}>{loading ? "Buscando..." : "1. Preview"}</button>
+            <button onClick={doImportUrl} disabled={loading || !preview || preview.length === 0} style={btnStyle(preview && preview.length > 0 ? "#4caf50" : "#ddd")}>{loading ? "Salvando..." : "2. Salvar no Notion"}</button>
           </div>
-        ) : null}
 
-        {/* Controles */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 2fr", gap: 12, marginBottom: 16 }}>
-          <Select label="Tipo" value={importTipo} onChange={setImportTipo} options={TIPOS_FONTE} />
-          <Select label="Estrategia" value={importEst} onChange={setImportEst} options={ESTRATEGIAS} />
-          <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
-            <button onClick={importMode === "url" ? doPreview : doCsvImport} disabled={loading || !canExtract} style={btnStyle(canExtract ? "#003366" : "#ddd")}>{extractLabel}</button>
-            <button onClick={doEnrich} disabled={enriching || !preview || preview.length === 0} style={btnStyle(preview && preview.length > 0 ? "#ff9800" : "#ddd")}>{enriching ? "Enriquecendo..." : "2. Apollo Enrich"}</button>
-            <button onClick={doSave} disabled={loading || !preview || preview.length === 0} style={btnStyle(preview && preview.length > 0 ? "#4caf50" : "#ddd")}>{loading ? "Salvando..." : "3. Salvar no Notion"}</button>
+          {preview && preview.length > 0 ? <PreviewTable rows={preview} /> : null}
+          {preview && preview.length === 0 ? <div style={{ background: "#fff3e0", borderRadius: 8, padding: 12, fontSize: 13, color: "#E65100" }}>Nenhuma empresa encontrada nesta URL.</div> : null}
+          {result && result.error ? <div style={{ background: "#ffebee", borderRadius: 8, padding: 12, fontSize: 13, color: "#c62828", marginTop: 12 }}>{"Erro: " + result.error}</div> : null}
+          {result && result.saved ? <div style={{ background: "#e8f5e9", borderRadius: 8, padding: 12, fontSize: 13, color: "#2E7D32", marginTop: 12 }}>{result.saved + " empresas salvas no Notion"}</div> : null}
+        </Card>
+      ) : null}
+
+      {/* ===== TAB: TEXTO ===== */}
+      {activeTab === "text" ? (
+        <Card title="Colar Texto Livre">
+          <Field label="Nome da fonte" value={pasteNome} onChange={setPasteNome} placeholder="Ex: LinkedIn, Email recebido, PDF do evento..." />
+          <div style={{ marginTop: 16, marginBottom: 8 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: "#888", marginBottom: 4 }}>Texto com dados de empresas e/ou pessoas *</div>
+            <textarea
+              value={pasteText}
+              onChange={function(e) { setPasteText(e.target.value); }}
+              placeholder={EXAMPLE_TEXT}
+              rows={14}
+              style={{ width: "100%", padding: "12px 14px", border: "2px solid #e8e8e8", borderRadius: 10, fontSize: 12, fontFamily: "'Courier New', monospace", lineHeight: 1.7, outline: "none", resize: "vertical", boxSizing: "border-box", color: "#333", background: "#fafafa" }}
+            />
+            <div style={{ fontSize: 11, color: "#aaa", marginTop: 4 }}>Cole qualquer formato — nome, email, LinkedIn, texto de bio, múltiplas entradas separadas por linha em branco ou "---"</div>
           </div>
-        </div>
 
-        {/* Preview */}
-        {preview && preview.length > 0 ? (
-          <div style={{ border: "2px solid #00B8A9", borderRadius: 10, overflow: "hidden" }}>
-            <div style={{ background: "#00B8A9", color: "white", padding: "8px 16px", fontSize: 13, fontWeight: 600 }}>{preview.length + " empresas encontradas"}</div>
-            <div style={{ maxHeight: 500, overflow: "auto" }}>
-              <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
-                <thead><tr style={{ background: "#f5f5f5", position: "sticky", top: 0 }}>
-                  <th style={thSt}>Empresa</th><th style={thSt}>Dominio</th><th style={thSt}>Setor</th><th style={thSt}>Pais</th><th style={thSt}>Descrição</th><th style={thSt}>Notas</th>
-                </tr></thead>
-                <tbody>{preview.map(function(c, i) {
-                  return <tr key={i} style={{ borderBottom: "1px solid #f0f0f0" }}>
-                    <td style={Object.assign({}, tdSt, { fontWeight: 600 })}>{c.nome}</td>
-                    <td style={tdSt}>{c.dominio ? <a href={"https://" + c.dominio} target="_blank" rel="noreferrer" style={{ color: "#1565C0", textDecoration: "none" }}>{c.dominio}</a> : <span style={{ color: "#ccc" }}>--</span>}</td>
-                    <td style={tdSt}>{c.setor ? <span style={{ background: "#e8f5e9", color: "#2E7D32", padding: "2px 6px", borderRadius: 4, fontSize: 11 }}>{c.setor}</span> : <span style={{ color: "#ccc" }}>--</span>}</td>
-                    <td style={tdSt}>{c.pais || <span style={{ color: "#ccc" }}>--</span>}</td>
-                    <td style={tdSt}>{c.descricao ? <span style={{ color: "#555" }}>{c.descricao.substring(0, 60)}</span> : <span style={{ color: "#ccc" }}>--</span>}</td>
-                    <td style={tdSt}>{c.notas || <span style={{ color: "#ccc" }}>--</span>}</td>
-                  </tr>;
-                })}</tbody>
-              </table>
+          <div style={{ display: "flex", gap: 8, marginTop: 12, marginBottom: 16 }}>
+            <button onClick={doParse} disabled={parsing || !pasteText.trim()} style={btnStyle(pasteText.trim() ? "#003366" : "#ddd")}>{parsing ? "Analisando..." : "1. Analisar com IA"}</button>
+            <button onClick={doImportParsed} disabled={loading || !parsedData} style={btnStyle(parsedData ? "#4caf50" : "#ddd")}>{loading ? "Salvando..." : "2. Salvar no Notion"}</button>
+          </div>
+
+          {/* Parsed preview */}
+          {parsedData ? (
+            <div>
+              {parsedData.empresas && parsedData.empresas.length > 0 ? (
+                <div style={{ marginBottom: 16 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#003366", marginBottom: 8 }}>{"🏢 " + parsedData.empresas.length + " empresa(s) identificada(s)"}</div>
+                  <PreviewTable rows={parsedData.empresas} />
+                </div>
+              ) : null}
+
+              {parsedData.leads && parsedData.leads.length > 0 ? (
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#003366", marginBottom: 8 }}>{"👤 " + parsedData.leads.length + " pessoa(s) identificada(s)"}</div>
+                  <div style={{ border: "2px solid #00B8A9", borderRadius: 10, overflow: "hidden" }}>
+                    <div style={{ maxHeight: 300, overflow: "auto" }}>
+                      <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
+                        <thead><tr style={{ background: "#f5f5f5", position: "sticky", top: 0 }}>
+                          <th style={thSt}>Nome</th>
+                          <th style={thSt}>Cargo</th>
+                          <th style={thSt}>Empresa</th>
+                          <th style={thSt}>Email</th>
+                          <th style={thSt}>LinkedIn</th>
+                        </tr></thead>
+                        <tbody>{parsedData.leads.map(function(l, i) {
+                          return <tr key={i} style={{ borderBottom: "1px solid #f0f0f0" }}>
+                            <td style={Object.assign({}, tdSt, { fontWeight: 600 })}>{l.nome}</td>
+                            <td style={tdSt}>{l.cargo || <span style={{ color: "#ccc" }}>--</span>}</td>
+                            <td style={tdSt}>{l.empresa || <span style={{ color: "#ccc" }}>--</span>}</td>
+                            <td style={tdSt}>{l.email || <span style={{ color: "#ccc" }}>--</span>}</td>
+                            <td style={tdSt}>{l.linkedin ? <a href={l.linkedin} target="_blank" rel="noreferrer" style={{ color: "#1565C0", textDecoration: "none" }}>LinkedIn</a> : <span style={{ color: "#ccc" }}>--</span>}</td>
+                          </tr>;
+                        })}</tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              {(!parsedData.empresas || parsedData.empresas.length === 0) && (!parsedData.leads || parsedData.leads.length === 0) ? (
+                <div style={{ background: "#fff3e0", borderRadius: 8, padding: 12, fontSize: 13, color: "#E65100" }}>Nenhum dado identificado. Tente reformatar o texto.</div>
+              ) : null}
             </div>
-          </div>
-        ) : null}
+          ) : null}
 
-        {preview && preview.length === 0 ? <div style={{ background: "#fff3e0", borderRadius: 8, padding: 12, fontSize: 13, color: "#E65100" }}>Nenhuma empresa encontrada.</div> : null}
-        {result && !result.error && result.saved ? <div style={{ background: "#e8f5e9", borderRadius: 8, padding: 12, fontSize: 13, color: "#2E7D32", marginTop: 12 }}>{result.saved + " empresas salvas no Notion"}</div> : null}
-        {result && result.error ? <div style={{ background: "#ffebee", borderRadius: 8, padding: 12, fontSize: 13, color: "#c62828", marginTop: 12 }}>{"Erro: " + result.error}</div> : null}
-      </Card>
+          {result && result.error ? <div style={{ background: "#ffebee", borderRadius: 8, padding: 12, fontSize: 13, color: "#c62828", marginTop: 12 }}>{"Erro: " + result.error}</div> : null}
+        </Card>
+      ) : null}
+    </div>
+  );
+}
+
+function PreviewTable(props) {
+  var rows = props.rows || [];
+  return (
+    <div style={{ border: "2px solid #00B8A9", borderRadius: 10, overflow: "hidden" }}>
+      <div style={{ background: "#00B8A9", color: "white", padding: "8px 16px", fontSize: 13, fontWeight: 600 }}>{rows.length + " empresas encontradas"}</div>
+      <div style={{ maxHeight: 500, overflow: "auto" }}>
+        <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
+          <thead><tr style={{ background: "#f5f5f5", position: "sticky", top: 0 }}>
+            <th style={thSt}>Empresa</th>
+            <th style={thSt}>Dominio</th>
+            <th style={thSt}>Setor</th>
+            <th style={thSt}>Pais</th>
+            <th style={thSt}>Tamanho</th>
+            <th style={thSt}>Funding</th>
+          </tr></thead>
+          <tbody>{rows.map(function(c, i) {
+            return <tr key={i} style={{ borderBottom: "1px solid #f0f0f0" }}>
+              <td style={Object.assign({}, tdSt, { fontWeight: 600 })}>{c.nome}</td>
+              <td style={tdSt}>{c.dominio ? <a href={"https://" + c.dominio} target="_blank" rel="noreferrer" style={{ color: "#1565C0", textDecoration: "none" }}>{c.dominio}</a> : <span style={{ color: "#ccc" }}>--</span>}</td>
+              <td style={tdSt}>{c.setor ? <span style={{ background: "#e8f5e9", color: "#2E7D32", padding: "2px 6px", borderRadius: 4, fontSize: 11 }}>{c.setor}</span> : <span style={{ color: "#ccc" }}>--</span>}</td>
+              <td style={tdSt}>{c.pais || <span style={{ color: "#ccc" }}>--</span>}</td>
+              <td style={tdSt}>{c.tamanoLabel || <span style={{ color: "#ccc" }}>--</span>}</td>
+              <td style={tdSt}>{c.funding || <span style={{ color: "#ccc" }}>--</span>}</td>
+            </tr>;
+          })}</tbody>
+        </table>
+      </div>
     </div>
   );
 }
