@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
+import { Client } from "@notionhq/client";
 import { getLeads, addLead, updateLeadPipeline, getStats, addBulkLeads, addBulkEmpresas, getEmpresas, addFonte } from "../../../lib/notion";
+
+var notion = new Client({ auth: process.env.NOTION_TOKEN });
 
 export async function GET(req) {
   try {
@@ -30,6 +33,17 @@ export async function POST(req) {
     // Update pipeline
     if (body.action === "updatePipeline") {
       await updateLeadPipeline(body.id, body.pipeline);
+      return NextResponse.json({ ok: true });
+    }
+
+    // Update email + linkedin from Apollo enrich
+    if (body.action === "updateEmail") {
+      var emailProps = {};
+      if (body.email) emailProps["Email"] = { email: body.email };
+      if (body.linkedin) emailProps["LinkedIn"] = { url: body.linkedin };
+      if (Object.keys(emailProps).length > 0) {
+        await notion.pages.update({ page_id: body.id, properties: emailProps });
+      }
       return NextResponse.json({ ok: true });
     }
 

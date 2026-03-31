@@ -44,10 +44,35 @@ export default function App() {
 // ============ DASHBOARD ============
 function DashboardPage(props) {
   var stats = props.stats;
-  if (!stats) return <div><h1 style={h1St}>Dashboard</h1><p style={{ color: "#888" }}>Cargando...</p></div>;
-  return (
+  var s1 = useState(false); var settingUp = s1[0]; var setSettingUp = s1[1];
+  var s2 = useState(null); var setupMsg = s2[0]; var setSetupMsg = s2[1];
+
+  var doSetup = function() {
+    setSettingUp(true); setSetupMsg(null);
+    fetch("/api/setup", { method: "POST" })
+      .then(function(r) { return r.json(); })
+      .then(function(d) { setSetupMsg(d.error ? { error: d.error } : { ok: true, text: d.message }); })
+      .catch(function(e) { setSetupMsg({ error: e.message }); })
+      .finally(function() { setSettingUp(false); });
+  };
+
+  if (!stats) return (
     <div>
       <h1 style={h1St}>Dashboard</h1>
+      <p style={{ color: "#888", marginBottom: 20 }}>Cargando...</p>
+      <button onClick={doSetup} disabled={settingUp} style={{ padding: "10px 20px", background: "#003366", color: "white", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>{settingUp ? "Configurando..." : "⚡ Setup Notion (criar databases)"}</button>
+      {setupMsg && setupMsg.ok ? <div style={{ marginTop: 12, background: "#e8f5e9", borderRadius: 8, padding: 12, fontSize: 13, color: "#2E7D32" }}>{setupMsg.text} — recarregue a página.</div> : null}
+      {setupMsg && setupMsg.error ? <div style={{ marginTop: 12, background: "#ffebee", borderRadius: 8, padding: 12, fontSize: 13, color: "#c62828" }}>{setupMsg.error}</div> : null}
+    </div>
+  );
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+        <h1 style={h1St}>Dashboard</h1>
+        <button onClick={doSetup} disabled={settingUp} style={{ padding: "8px 16px", background: "transparent", color: "#003366", border: "1px solid #003366", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>{settingUp ? "Configurando..." : "⚡ Setup Notion"}</button>
+      </div>
+      {setupMsg && setupMsg.ok ? <div style={{ marginBottom: 16, background: "#e8f5e9", borderRadius: 8, padding: 12, fontSize: 13, color: "#2E7D32" }}>{setupMsg.text}</div> : null}
+      {setupMsg && setupMsg.error ? <div style={{ marginBottom: 16, background: "#ffebee", borderRadius: 8, padding: 12, fontSize: 13, color: "#c62828" }}>{setupMsg.error}</div> : null}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 14, marginBottom: 24 }}>
         <StatCard label="Leads" value={stats.total} color="#003366" />
         <StatCard label="Empresas" value={stats.empresas || 0} color="#00B8A9" />
@@ -378,13 +403,77 @@ function PipelinePage() {
   var s2 = useState(true); var loading = s2[0]; var setLoading = s2[1];
   var s3 = useState(""); var searchQ = s3[0]; var setSearchQ = s3[1];
   var s4 = useState(""); var pipeF = s4[0]; var setPipeF = s4[1];
+  var s5 = useState(null); var selected = s5[0]; var setSelected = s5[1];
+  var s6 = useState(false); var enriching = s6[0]; var setEnriching = s6[1];
+  var s7 = useState(null); var enrichResult = s7[0]; var setEnrichResult = s7[1];
+  var s8 = useState(false); var hunting = s8[0]; var setHunting = s8[1];
+  var s9 = useState(null); var hunterResult = s9[0]; var setHunterResult = s9[1];
 
-  var load = function() { setLoading(true); fetch("/api/leads").then(function(r) { return r.json(); }).then(function(d) { if (Array.isArray(d)) setLeads(d); }).catch(function() {}).finally(function() { setLoading(false); }); };
+  var load = function() {
+    setLoading(true);
+    fetch("/api/leads").then(function(r) { return r.json(); }).then(function(d) { if (Array.isArray(d)) setLeads(d); }).catch(function() {}).finally(function() { setLoading(false); });
+  };
   useEffect(function() { load(); }, []);
 
   var updatePipe = function(id, pipeline) {
     fetch("/api/leads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "updatePipeline", id: id, pipeline: pipeline }) }).catch(function() {});
     setLeads(function(prev) { return prev.map(function(l) { return l.id === id ? Object.assign({}, l, { pipeline: pipeline }) : l; }); });
+    if (selected && selected.id === id) setSelected(Object.assign({}, selected, { pipeline: pipeline }));
+  };
+
+  var openLead = function(l) { setSelected(l); setEnrichResult(null); setHunterResult(null); };
+  var closeLead = function() { setSelected(null); setEnrichResult(null); setHunterResult(null); };
+
+  var doHunter = function() {
+    if (!selected) return;
+    setHunting(true); setHunterResult(null);
+    fetch("/api/hunter", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ nome: selected.nome, empresa: selected.empresa, dominio: selected.dominio || "" })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.error) { setHunterResult({ error: data.error }); return; }
+      setHunterResult(data);
+      if (data.email) {
+        var updated = Object.assign({}, selected, { email: data.email });
+        setSelected(updated);
+        setLeads(function(prev) { return prev.map(function(l) { return l.id === selected.id ? updated : l; }); });
+        fetch("/api/leads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "updateEmail", id: selected.id, email: data.email }) }).catch(function() {});
+      }
+    })
+    .catch(function(e) { setHunterResult({ error: e.message }); })
+    .finally(function() { setHunting(false); });
+  };
+
+  var doEnrich = function() {
+    if (!selected) return;
+    setEnriching(true); setEnrichResult(null);
+    fetch("/api/apollo", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ person: { nome: selected.nome, empresa: selected.empresa, linkedin: selected.linkedin } })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.error) { setEnrichResult({ error: data.error }); return; }
+      var enriched = data.data || {};
+      // Update lead locally
+      var updated = Object.assign({}, selected, {
+        email: enriched.email || selected.email,
+        linkedin: enriched.linkedin || selected.linkedin,
+      });
+      setSelected(updated);
+      setLeads(function(prev) { return prev.map(function(l) { return l.id === selected.id ? updated : l; }); });
+      // Save email back to Notion if found
+      if (enriched.email) {
+        fetch("/api/leads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "updateEmail", id: selected.id, email: enriched.email, linkedin: enriched.linkedin }) }).catch(function() {});
+      }
+      setEnrichResult({ ok: true, email: enriched.email, linkedin: enriched.linkedin, credits: enriched.credits });
+    })
+    .catch(function(e) { setEnrichResult({ error: e.message }); })
+    .finally(function() { setEnriching(false); });
   };
 
   var filtered = leads.filter(function(l) {
@@ -393,35 +482,191 @@ function PipelinePage() {
     return true;
   });
 
+  // Template by persona
+  var getTemplate = function(lead) {
+    var templates = {
+      "Expansor Multi-Region": "Hola [Nome],\n\nVi que [Empresa] opera en varios mercados. En Lawi ofrecemos un departamento legal centralizado para scaleups multi-region.\n\nTe interesa una call de 15 min?\n\nSaludos",
+      "Hueco Operativo": "Hola [Nome],\n\nNote que [Empresa] busca un Legal Counsel part-time. En Lawi ofrecemos LDFS — un equipo legal completo por menos presupuesto.\n\nConversamos?\n\nSaludos",
+      "Post-Ronda": "Hola [Nome],\n\nFelicitaciones por la ronda de [Empresa]! En Lawi acompanamos startups post-ronda — GDPR, ESOPs, pactos de socios.\n\nAgendamos?\n\nSaludos",
+      "Derivado VC/Aceleradora": "Hola [Nome],\n\nEn Lawi trabajamos como departamento legal tercerizado para startups tech. Nos encantaria ser el partner legal del portfolio de [Empresa].\n\nPodemos conversar?\n\nSaludos",
+      "Heavy-Contracts B2B": "Hola [Nome],\n\nMuchas empresas SaaS B2B como [Empresa] pierden tiempo revisando contratos. En Lawi gestionamos todo — NDAs, MSAs, vendor agreements.\n\nHablamos?\n\nSaludos",
+    };
+    var t = templates[lead.persona] || templates["Expansor Multi-Region"];
+    return t.replace(/\[Nome\]/g, lead.nome.split(" ")[0]).replace(/\[Empresa\]/g, lead.empresa || "su empresa");
+  };
+
   return (
-    <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-        <h1 style={{ fontSize: 22, fontWeight: 700, color: "#003366" }}>Pipeline Leads</h1>
-        <button onClick={load} style={{ padding: "8px 16px", background: "#003366", color: "white", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 600 }}>Atualizar</button>
-      </div>
-      <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-        <input value={searchQ} onChange={function(e) { setSearchQ(e.target.value); }} placeholder="Buscar..." style={inputSt} />
-        <select value={pipeF} onChange={function(e) { setPipeF(e.target.value); }} style={selectSt}><option value="">Todos</option>{PIPELINES.map(function(p) { return <option key={p} value={p}>{p}</option>; })}</select>
-        <span style={{ fontSize: 12, color: "#888", alignSelf: "center" }}>{filtered.length + " leads"}</span>
-      </div>
-      {loading ? <p>Cargando...</p> : (
-        <div>
-          {filtered.length === 0 ? <p style={{ color: "#aaa" }}>No hay leads.</p> : null}
-          {filtered.map(function(l) {
-            return (
-              <div key={l.id} style={{ background: "white", borderRadius: 10, padding: "12px 16px", marginBottom: 6, display: "flex", alignItems: "center", gap: 12, boxShadow: "0 1px 3px rgba(0,0,0,0.04)", borderLeft: "4px solid " + (PIPE_COLORS[l.pipeline] || "#ccc") }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 600, fontSize: 14 }}>{l.nome}</div>
-                  <div style={{ fontSize: 12, color: "#666" }}>{l.cargo}{l.cargo && l.empresa ? " - " : ""}{l.empresa}</div>
-                </div>
-                <select value={l.pipeline} onChange={function(e) { updatePipe(l.id, e.target.value); }} style={{ padding: "6px 8px", border: "2px solid " + (PIPE_COLORS[l.pipeline] || "#ccc"), borderRadius: 6, fontSize: 12, fontWeight: 600, color: PIPE_COLORS[l.pipeline] || "#333", background: "white" }}>
-                  {PIPELINES.map(function(p) { return <option key={p} value={p}>{p}</option>; })}
-                </select>
-              </div>
-            );
-          })}
+    <div style={{ display: "flex", gap: 0, position: "relative" }}>
+      {/* LIST */}
+      <div style={{ flex: 1, minWidth: 0, transition: "all 0.2s" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <h1 style={{ fontSize: 22, fontWeight: 700, color: "#003366" }}>Pipeline Leads</h1>
+          <button onClick={load} style={{ padding: "8px 16px", background: "#003366", color: "white", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 600 }}>Atualizar</button>
         </div>
-      )}
+        <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+          <input value={searchQ} onChange={function(e) { setSearchQ(e.target.value); }} placeholder="Buscar..." style={inputSt} />
+          <select value={pipeF} onChange={function(e) { setPipeF(e.target.value); }} style={selectSt}><option value="">Todos</option>{PIPELINES.map(function(p) { return <option key={p} value={p}>{p}</option>; })}</select>
+          <span style={{ fontSize: 12, color: "#888", alignSelf: "center" }}>{filtered.length + " leads"}</span>
+        </div>
+        {loading ? <p>Cargando...</p> : (
+          <div>
+            {filtered.length === 0 ? <p style={{ color: "#aaa" }}>No hay leads.</p> : null}
+            {filtered.map(function(l) {
+              var isActive = selected && selected.id === l.id;
+              return (
+                <div key={l.id} onClick={function() { openLead(l); }} style={{ background: isActive ? "#e8f0fb" : "white", borderRadius: 10, padding: "12px 16px", marginBottom: 6, display: "flex", alignItems: "center", gap: 12, boxShadow: "0 1px 3px rgba(0,0,0,0.04)", borderLeft: "4px solid " + (PIPE_COLORS[l.pipeline] || "#ccc"), cursor: "pointer", transition: "background 0.15s" }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 600, fontSize: 14, color: "#003366" }}>{l.nome}</div>
+                    <div style={{ fontSize: 12, color: "#666" }}>{l.cargo}{l.cargo && l.empresa ? " — " : ""}{l.empresa}</div>
+                    {l.email ? <div style={{ fontSize: 11, color: "#00B8A9", marginTop: 2 }}>✓ {l.email}</div> : null}
+                  </div>
+                  {l.persona ? <span style={{ background: "#e8f0fb", color: "#003366", padding: "2px 8px", borderRadius: 6, fontSize: 10, fontWeight: 600, whiteSpace: "nowrap" }}>{l.persona.split(" ")[0]}</span> : null}
+                  <select value={l.pipeline} onClick={function(e) { e.stopPropagation(); }} onChange={function(e) { e.stopPropagation(); updatePipe(l.id, e.target.value); }} style={{ padding: "6px 8px", border: "2px solid " + (PIPE_COLORS[l.pipeline] || "#ccc"), borderRadius: 6, fontSize: 12, fontWeight: 600, color: PIPE_COLORS[l.pipeline] || "#333", background: "white" }}>
+                    {PIPELINES.map(function(p) { return <option key={p} value={p}>{p}</option>; })}
+                  </select>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* DRAWER */}
+      {selected ? (
+        <div style={{ width: 340, flexShrink: 0, marginLeft: 20, background: "white", borderRadius: 12, boxShadow: "0 4px 20px rgba(0,0,51,0.1)", border: "1px solid #e0e8f0", padding: 24, position: "sticky", top: 0, alignSelf: "flex-start", maxHeight: "90vh", overflowY: "auto" }}>
+          {/* Header */}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
+            <div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: "#003366" }}>{selected.nome}</div>
+              <div style={{ fontSize: 12, color: "#666", marginTop: 2 }}>{selected.cargo}{selected.cargo && selected.empresa ? " — " : ""}{selected.empresa}</div>
+            </div>
+            <button onClick={closeLead} style={{ background: "none", border: "none", fontSize: 18, color: "#aaa", cursor: "pointer", lineHeight: 1 }}>✕</button>
+          </div>
+
+          {/* Pipeline status */}
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: "#888", marginBottom: 6 }}>STATUS</div>
+            <select value={selected.pipeline} onChange={function(e) { updatePipe(selected.id, e.target.value); }} style={{ width: "100%", padding: "8px 10px", border: "2px solid " + (PIPE_COLORS[selected.pipeline] || "#ccc"), borderRadius: 8, fontSize: 13, fontWeight: 600, color: PIPE_COLORS[selected.pipeline] || "#333", background: "white", outline: "none" }}>
+              {PIPELINES.map(function(p) { return <option key={p} value={p}>{p}</option>; })}
+            </select>
+          </div>
+
+          {/* Contact info */}
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: "#888", marginBottom: 8 }}>CONTATO</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {selected.email
+                ? <div style={{ fontSize: 13, color: "#333" }}>✉️ {selected.email}</div>
+                : <div style={{ fontSize: 12, color: "#bbb", fontStyle: "italic" }}>Email não encontrado</div>
+              }
+              {selected.linkedin
+                ? <a href={selected.linkedin} target="_blank" rel="noreferrer" style={{ fontSize: 13, color: "#0077B5", textDecoration: "none" }}>🔗 LinkedIn</a>
+                : <div style={{ fontSize: 12, color: "#bbb", fontStyle: "italic" }}>LinkedIn não informado</div>
+              }
+            </div>
+          </div>
+
+          {/* Info */}
+          {(selected.pais || selected.setor || selected.persona || selected.estrategia) ? (
+            <div style={{ marginBottom: 20, display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {selected.pais ? <span style={{ background: "#e3f2fd", color: "#1565C0", padding: "3px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600 }}>{selected.pais}</span> : null}
+              {selected.setor ? <span style={{ background: "#e8f5e9", color: "#2E7D32", padding: "3px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600 }}>{selected.setor}</span> : null}
+              {selected.persona ? <span style={{ background: "#e8f0fb", color: "#003366", padding: "3px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600 }}>{selected.persona}</span> : null}
+              {selected.estrategia ? <span style={{ background: "#fff3e0", color: "#E65100", padding: "3px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600 }}>{selected.estrategia}</span> : null}
+            </div>
+          ) : null}
+
+          {/* Divider */}
+          <div style={{ borderTop: "1px solid #f0f0f0", marginBottom: 16 }} />
+
+          {/* ACTIONS */}
+          <div style={{ fontSize: 11, fontWeight: 600, color: "#888", marginBottom: 10 }}>AÇÕES</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+
+            {/* Enriquecer Apollo */}
+            <button onClick={doEnrich} disabled={enriching} style={{ padding: "10px 14px", background: enriching ? "#f5f5f5" : "#003366", color: enriching ? "#aaa" : "white", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: enriching ? "default" : "pointer", textAlign: "left" }}>
+              {enriching ? "⏳ Buscando no Apollo..." : "🔍 Enriquecer com Apollo"}
+            </button>
+
+            {/* Buscar Email Hunter */}
+            <button onClick={doHunter} disabled={hunting} style={{ padding: "10px 14px", background: hunting ? "#f5f5f5" : "#e8730a", color: hunting ? "#aaa" : "white", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: hunting ? "default" : "pointer", textAlign: "left" }}>
+              {hunting ? "⏳ Buscando email..." : "📧 Buscar Email com Hunter"}
+            </button>
+
+            {/* Email */}
+            <button
+              disabled={!selected.email}
+              onClick={function() {
+                var body = getTemplate(selected);
+                window.location.href = "mailto:" + selected.email + "?subject=Lawi%20Legal%20Department%20as%20a%20Service&body=" + encodeURIComponent(body);
+              }}
+              style={{ padding: "10px 14px", background: selected.email ? "#00B8A9" : "#f5f5f5", color: selected.email ? "white" : "#bbb", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: selected.email ? "pointer" : "default", textAlign: "left" }}
+            >
+              ✉️ Enviar Email {!selected.email ? "(sem email)" : ""}
+            </button>
+
+            {/* LinkedIn */}
+            <button
+              disabled={!selected.linkedin}
+              onClick={function() { if (selected.linkedin) window.open(selected.linkedin, "_blank"); }}
+              style={{ padding: "10px 14px", background: selected.linkedin ? "#0077B5" : "#f5f5f5", color: selected.linkedin ? "white" : "#bbb", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: selected.linkedin ? "pointer" : "default", textAlign: "left" }}
+            >
+              🔗 Abrir LinkedIn {!selected.linkedin ? "(não informado)" : ""}
+            </button>
+
+            {/* Copiar template */}
+            <button
+              onClick={function() { if (navigator.clipboard) navigator.clipboard.writeText(getTemplate(selected)); }}
+              style={{ padding: "10px 14px", background: "#f5f5f5", color: "#333", border: "1px solid #e0e0e0", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer", textAlign: "left" }}
+            >
+              📋 Copiar mensagem LinkedIn
+            </button>
+          </div>
+
+          {/* Enrich result */}
+          {enrichResult && enrichResult.ok ? (
+            <div style={{ marginTop: 16, background: "#e8f5e9", borderRadius: 8, padding: 12, fontSize: 12 }}>
+              <div style={{ fontWeight: 700, color: "#2E7D32", marginBottom: 4 }}>✓ Enriquecido com sucesso</div>
+              {enrichResult.email ? <div style={{ color: "#333" }}>Email: {enrichResult.email}</div> : <div style={{ color: "#999" }}>Email não encontrado</div>}
+              {enrichResult.linkedin ? <div style={{ color: "#333", marginTop: 2 }}>LinkedIn: encontrado</div> : null}
+              {enrichResult.credits !== undefined ? <div style={{ color: "#888", marginTop: 4, fontSize: 11 }}>Créditos restantes: {enrichResult.credits}</div> : null}
+            </div>
+          ) : null}
+          {enrichResult && enrichResult.error ? (
+            <div style={{ marginTop: 16, background: "#ffebee", borderRadius: 8, padding: 12, fontSize: 12, color: "#c62828" }}>
+              Erro Apollo: {enrichResult.error}
+            </div>
+          ) : null}
+
+          {/* Hunter result */}
+          {hunterResult && hunterResult.email ? (
+            <div style={{ marginTop: 12, background: "#fff3e0", borderRadius: 8, padding: 12, fontSize: 12 }}>
+              <div style={{ fontWeight: 700, color: "#e8730a", marginBottom: 4 }}>✓ Email encontrado pelo Hunter</div>
+              <div style={{ color: "#333" }}>📧 {hunterResult.email}</div>
+              <div style={{ color: "#888", marginTop: 2 }}>Confiança: {hunterResult.score}% · {hunterResult.sources} fonte(s)</div>
+              {hunterResult.remaining !== null ? <div style={{ color: "#aaa", marginTop: 2, fontSize: 11 }}>Buscas restantes: {hunterResult.remaining}</div> : null}
+            </div>
+          ) : null}
+          {hunterResult && !hunterResult.email && !hunterResult.error ? (
+            <div style={{ marginTop: 12, background: "#fff3e0", borderRadius: 8, padding: 12, fontSize: 12, color: "#e8730a" }}>
+              Hunter não encontrou email para este contato no domínio {hunterResult.dominio}.
+            </div>
+          ) : null}
+          {hunterResult && hunterResult.error ? (
+            <div style={{ marginTop: 12, background: "#ffebee", borderRadius: 8, padding: 12, fontSize: 12, color: "#c62828" }}>
+              Erro Hunter: {hunterResult.error}
+            </div>
+          ) : null}
+
+          {/* Notes */}
+          {selected.notas ? (
+            <div style={{ marginTop: 16 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: "#888", marginBottom: 6 }}>NOTAS</div>
+              <div style={{ fontSize: 12, color: "#555", background: "#fafafa", borderRadius: 8, padding: 10, lineHeight: 1.6 }}>{selected.notas}</div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }
